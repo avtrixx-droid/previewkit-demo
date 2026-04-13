@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PreviewKit — Custom Phone Case</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #f2f2f7;
+      --surface: #ffffff;
+      --border:  #e0e0e8;
+      --text:    #1d1d1f;
+      --muted:   #86868b;
+      --indigo:  #6366f1;
+      --radius:  20px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: rgba(255,255,255,0.84);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .header-inner {
+      max-width: 1000px; margin: 0 auto;
+      padding: 0 24px; height: 54px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo { display: flex; align-items: center; gap: 9px; text-decoration: none; }
+    .logo-mark {
+      width: 30px; height: 30px;
+      background: linear-gradient(135deg, #6366f1, #4f46e5);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .logo-name { font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: -0.3px; }
+    .header-pill {
+      font-size: 11px; font-weight: 600; padding: 3px 10px;
+      border-radius: 100px; letter-spacing: 0.2px;
+    }
+    .pill-demo { background: #ede9fe; color: #5b21b6; }
+    .pill-live { background: #d4edda; color: #155724; }
+
+    /* ── Page ── */
+    .page { max-width: 1000px; margin: 0 auto; padding: 48px 20px 80px; }
+
+    /* ── Breadcrumb ── */
+    .breadcrumb {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--muted); margin-bottom: 28px;
+    }
+    .breadcrumb a { color: var(--muted); text-decoration: none; }
+    .breadcrumb a:hover { color: var(--text); }
+    .breadcrumb span { color: var(--border); }
+
+    /* ── Product layout ── */
+    .product {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 36px;
+    }
+    @media(min-width: 720px) {
+      .product { grid-template-columns: 1fr 1fr; align-items: start; }
+    }
+
+    /* ── Left column: customiser entry ── */
+    #pk-widget {
+      /* SDK renders the trigger card — no extra wrapper styling needed */
+    }
+
+    /* ── Product info (right column) ── */
+    .product-info { display: flex; flex-direction: column; gap: 22px; }
+
+    .product-category {
+      font-size: 11px; font-weight: 700; color: var(--indigo);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .product-title {
+      font-size: clamp(24px, 3vw, 32px);
+      font-weight: 700; letter-spacing: -0.5px; line-height: 1.15;
+      margin-top: 6px;
+    }
+    .product-stars {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 13px; color: var(--muted);
+    }
+    .stars { color: #f59e0b; letter-spacing: -1px; }
+
+    .product-price-row {
+      display: flex; align-items: baseline; gap: 10px;
+    }
+    .product-price { font-size: 26px; font-weight: 700; color: var(--text); }
+    .product-price-orig {
+      font-size: 16px; color: var(--muted); text-decoration: line-through;
+    }
+    .product-price-save {
+      font-size: 12px; font-weight: 600;
+      background: #fef3c7; color: #92400e;
+      padding: 2px 8px; border-radius: 100px;
+    }
+
+    .divider { height: 1px; background: var(--border); }
+
+    /* Model selector */
+    .option-label {
+      font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px;
+    }
+    .model-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .model-pill {
+      padding: 8px 14px; border-radius: 10px;
+      border: 1.5px solid var(--border);
+      font-size: 13px; font-weight: 500; color: var(--text);
+      cursor: pointer; transition: all 0.15s; background: #fff;
+    }
+    .model-pill:hover { border-color: var(--indigo); color: var(--indigo); }
+    .model-pill.active { border-color: var(--indigo); background: #eeecff; color: #4f46e5; }
+
+    /* Features list */
+    .features { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .features li {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 13px; color: var(--muted); line-height: 1.5;
+    }
+    .feat-icon {
+      flex-shrink: 0; margin-top: 1px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #ede9fe;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .feat-icon svg { color: var(--indigo); }
+
+    .product-desc {
+      font-size: 13px; color: var(--muted); line-height: 1.7;
+    }
+
+    /* Trust badges */
+    .trust-row {
+      display: flex; gap: 16px; flex-wrap: wrap;
+    }
+    .trust-badge {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 500; color: var(--muted);
+    }
+    .trust-badge svg { color: var(--indigo); }
+
+    /* ── Integration snippet ── */
+    .section { margin-top: 60px; }
+    .section-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.3px; }
+    .section-sub   { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+    .code-card {
+      background: #18181e; border-radius: 16px;
+      border: 1px solid #2e2e38; overflow: hidden;
+    }
+    .code-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; background: #222228; border-bottom: 1px solid #2e2e38;
+    }
+    .code-dots { display: flex; gap: 6px; }
+    .code-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .code-dot:nth-child(1){background:#ff5f57}
+    .code-dot:nth-child(2){background:#febc2e}
+    .code-dot:nth-child(3){background:#28c840}
+    .code-lang { font-size: 11px; font-weight: 600; color: #666680; letter-spacing: 0.5px; text-transform: uppercase; }
+    .copy-btn {
+      background: #2e2e38; border: none; color: #ebebf0;
+      font-size: 11px; font-weight: 500; padding: 5px 12px;
+      border-radius: 6px; cursor: pointer; transition: background 0.15s;
+    }
+    .copy-btn:hover { background: #3a3a48; }
+    .copy-btn.copied { background: #1c3d1c; color: #34d399; }
+    pre { margin: 0; padding: 22px; overflow-x: auto; font-size: 13px; line-height: 1.75; }
+    code { font-family: 'SF Mono','Fira Code',Consolas,monospace; color: #e8e8f0; }
+    .t-comment { color: #52527a; font-style: italic; }
+    .t-tag  { color: #f87171; }
+    .t-attr { color: #67e8f9; }
+    .t-str  { color: #86efac; }
+    .t-key  { color: #67e8f9; }
+    .t-fn   { color: #fbbf24; }
+    .t-obj  { color: #e8e8f0; }
+
+    /* Footer */
+    .footer {
+      margin-top: 64px; padding: 24px; text-align: center;
+      font-size: 12px; color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+    .footer a { color: var(--indigo); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-inner">
+      <a class="logo" href="#">
+        <div class="logo-mark">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21,15 16,10 5,21"/>
+          </svg>
+        </div>
+        <span class="logo-name">PreviewKit</span>
+      </a>
+      <span class="header-pill pill-demo" id="mode-pill">Demo Mode</span>
+    </div>
+  </header>
+
+  <main class="page">
+
+    <!-- Breadcrumb -->
+    <nav class="breadcrumb">
+      <a href="#">Home</a>
+      <span>›</span>
+      <a href="#">Cases</a>
+      <span>›</span>
+      <span style="color: var(--text)">Custom iPhone Case</span>
+    </nav>
+
+    <div class="product">
+
+      <!-- Left: PreviewKit trigger (SDK renders here) -->
+      <div id="pk-widget"></div>
+
+      <!-- Right: product info -->
+      <div class="product-info">
+        <div>
+          <p class="product-category">Custom Phone Case</p>
+          <h1 class="product-title">iPhone 17 Pro — Your Photo Case</h1>
+          <div class="product-stars" style="margin-top:10px">
+            <span class="stars">★★★★★</span>
+            <span>4.9 &nbsp;(2,840 reviews)</span>
+          </div>
+        </div>
+
+        <div class="product-price-row">
+          <span class="product-price">$29.99</span>
+          <span class="product-price-orig">$39.99</span>
+          <span class="product-price-save">25% OFF</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Model selector -->
+        <div>
+          <div class="option-label">Select model</div>
+          <div class="model-pills">
+            <div class="model-pill active">iPhone 17 Pro</div>
+            <div class="model-pill">iPhone 17</div>
+            <div class="model-pill">iPhone 16 Pro</div>
+            <div class="model-pill">iPhone 16</div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Features -->
+        <ul class="features">
+          <li>
+            <span class="feat-icon">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            Upload any photo — drag &amp; reposition it in the customiser
+          </li>
+          <li>
+            <span class="feat-icon">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            Pinch or scroll to zoom · mobile &amp; desktop friendly
+          </li>
+          <li>
+            <span class="feat-icon">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            300 DPI print-ready file generated automatically
+          </li>
+          <li>
+            <span class="feat-icon">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            Print file delivered to your printer instantly
+          </li>
+          <li>
+            <span class="feat-icon">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            Ships in 3–5 business days · Free returns
+          </li>
+        </ul>
+
+        <p class="product-desc">
+          Upload any photo — your pet, a holiday snap, a portrait. Use the customiser to perfectly position your image. Confirm your design and a high-resolution print file goes straight to production.
+        </p>
+
+        <!-- Trust badges -->
+        <div class="trust-row">
+          <span class="trust-badge">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Secure checkout
+          </span>
+          <span class="trust-badge">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            30-day guarantee
+          </span>
+          <span class="trust-badge">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="2"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+            Fast delivery
+          </span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Integration snippet -->
+    <div class="section">
+      <div class="section-title">Add to any product page in 3 lines</div>
+      <div class="section-sub">Drop-in. No framework required. Works with Shopify, WooCommerce, or plain HTML.</div>
+      <div class="code-card">
+        <div class="code-bar">
+          <div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div>
+          <span class="code-lang">HTML</span>
+          <button class="copy-btn" id="copy-btn" onclick="copyCode()">Copy</button>
+        </div>
+        <pre><code><span class="t-comment">&lt;!-- 1. Container --&gt;</span>
+<span class="t-tag">&lt;div</span> <span class="t-attr">id</span>=<span class="t-str">"pk-widget"</span><span class="t-tag">&gt;&lt;/div&gt;</span>
+
+<span class="t-comment">&lt;!-- 2. SDK --&gt;</span>
+<span class="t-tag">&lt;script</span> <span class="t-attr">src</span>=<span class="t-str">"https://cdn.previewkit.com/sdk.js"</span><span class="t-tag">&gt;&lt;/script&gt;</span>
+
+<span class="t-comment">&lt;!-- 3. Init --&gt;</span>
+<span class="t-tag">&lt;script&gt;</span>
+  <span class="t-obj">PreviewKit</span>.<span class="t-fn">init</span>({
+    <span class="t-key">container</span>:  <span class="t-str">"#pk-widget"</span>,
+    <span class="t-key">templateId</span>: <span class="t-str">"phonecase_iphone17"</span>,
+    <span class="t-key">apiKey</span>:     <span class="t-str">"pk_live_your_key"</span>
+  });
+
+  <span class="t-obj">PreviewKit</span>.<span class="t-fn">on</span>(<span class="t-str">"confirm"</span>, <span class="t-fn">function</span>(<span class="t-obj">data</span>) {
+    <span class="t-comment">// data.designId, data.printReadyUrl, data.status</span>
+    <span class="t-obj">cart</span>.<span class="t-fn">addItem</span>({ <span class="t-key">designId</span>: <span class="t-obj">data</span>.<span class="t-key">designId</span> });
+  });
+<span class="t-tag">&lt;/script&gt;</span></code></pre>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="footer">
+    PreviewKit &mdash; Infrastructure for product customisation.
+    &nbsp;&middot;&nbsp;<a href="#">Docs</a>&nbsp;&middot;&nbsp;<a href="#">GitHub</a>
+  </footer>
+
+  <!-- Demo template -->
+  <script>
+    var TEMPLATE_DEMO = {
+      templateId: 'phonecase_iphone17',
+      canvas: { width: 360, height: 600 },
+      phoneCase: { x:40, y:20, width:280, height:560, radius:44, caseColor:'#ffffff', borderColor:'#d0d0d0' },
+      printArea: { x:58, y:142, width:244, height:396, radius:4 },
+      camera: {
+        island: { x:58, y:38, width:105, height:90, radius:22, color:'#1a1a1a' },
+        lenses: [
+          { cx:95,  cy:73, outerRadius:19, innerRadius:14 },
+          { cx:138, cy:73, outerRadius:16, innerRadius:11 }
+        ],
+        flash: { cx:95, cy:107, radius:7 }
+      },
+      buttons: [
+        { side:'left',  offset:88,  length:22, thickness:5, radius:2 },
+        { side:'left',  offset:128, length:55, thickness:5, radius:2 },
+        { side:'left',  offset:198, length:55, thickness:5, radius:2 },
+        { side:'right', offset:140, length:80, thickness:5, radius:2 }
+      ],
+      port: { width:52, height:12, radius:4 },
+      layouts: {
+        full_back:   { printArea: { x:58, y:30,  width:244, height:510, radius:4 } },
+        centered:    { printArea: { x:98, y:210, width:164, height:240, radius:4 } },
+        skip_camera: { printArea: { x:58, y:142, width:244, height:396, radius:4 } }
+      },
+      constraints: {
+        minRecommendedWidthPx: 768,
+        minRecommendedHeightPx: 1654
+      }
+    };
+  </script>
+
+  <script src="sdk/previewkit.js"></script>
+
+  <script>
+    var params     = new URLSearchParams(window.location.search);
+    var apiKey     = params.get('apiKey')     || null;
+    var apiUrl     = params.get('apiUrl')     || 'http://localhost:8080';
+    var templateId = params.get('templateId') || 'phonecase_iphone17';
+
+    // Update header pill
+    var pill = document.getElementById('mode-pill');
+    if (apiKey) {
+      pill.textContent = 'Live Mode';
+      pill.className   = 'header-pill pill-live';
+    }
+
+    // Model pill interaction (demo only)
+    document.querySelectorAll('.model-pill').forEach(function (p) {
+      p.addEventListener('click', function () {
+        document.querySelectorAll('.model-pill').forEach(function (x) { x.classList.remove('active'); });
+        p.classList.add('active');
+      });
+    });
+
+    // Init SDK
+    if (apiKey) {
+      PreviewKit.init({ container: '#pk-widget', templateId: templateId, apiKey: apiKey, apiUrl: apiUrl });
+    } else {
+      PreviewKit.init({ container: '#pk-widget', template: TEMPLATE_DEMO });
+    }
+
+    // Events
+    PreviewKit.on('confirm', function (data) {
+      if (data.designId) {
+        console.log('[PreviewKit] Confirmed:', data.designId, '| Print:', data.printReadyUrl);
+      }
+    });
+
+    function copyCode() {
+      var raw = [
+        '<div id="pk-widget"></div>',
+        '',
+        '<script src="https://cdn.previewkit.com/sdk.js"><\/script>',
+        '',
+        '<script>',
+        '  PreviewKit.init({',
+        '    container:  "#pk-widget",',
+        '    templateId: "phonecase_iphone17",',
+        '    apiKey:     "pk_live_your_key"',
+        '  });',
+        '',
+        '  PreviewKit.on("confirm", function(data) {',
+        '    cart.addItem({ designId: data.designId });',
+        '  });',
+        '<\/script>'
+      ].join('\n');
+      navigator.clipboard.writeText(raw).then(function () {
+        var btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+      });
+    }
+  </script>
+
+</body>
+</html>

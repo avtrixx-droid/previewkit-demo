@@ -1,0 +1,53 @@
+{
+  "templateKey": "phonecase_iphone17",
+  "name": "iPhone 17 Case (Back)",
+  "product": "phonecase",
+  "schemaVersion": 1,
+
+  "preview": {
+    "canvasWidth": 360,
+    "canvasHeight": 600,
+    "phoneCase": {
+      "x": 40, "y": 20, "width": 280, "height": 560,
+      "radius": 44, "caseColor": "#ffffff", "borderColor": "#d0d0d0"
+    },
+    "printArea": {
+      "x": 58, "y": 142, "width": 244, "height": 396, "radius": 4
+    },
+    "camera": {
+      "island": { "x": 58, "y": 38, "width": 105, "height": 90, "radius": 22, "color": "#1a1a1a" },
+      "lenses": [
+        { "cx": 95,  "cy": 73, "outerRadius": 19, "innerRadius": 14 },
+        { "cx": 138, "cy": 73, "outerRadius": 16, "innerRadius": 11 }
+      ],
+      "flash": { "cx": 95, "cy": 107, "radius": 7 }
+    },
+    "buttons": [
+      { "side": "left",  "offset": 88,  "length": 22, "thickness": 5, "radius": 2 },
+      { "side": "left",  "offset": 128, "length": 55, "thickness": 5, "radius": 2 },
+      { "side": "left",  "offset": 198, "length": 55, "thickness": 5, "radius": 2 },
+      { "side": "right", "offset": 140, "length": 80, "thickness": 5, "radius": 2 }
+    ],
+    "port": { "width": 52, "height": 12, "radius": 4 }
+  },
+
+  "print": {
+    "widthMm": 71,
+    "heightMm": 146,
+    "bleedMm": 3,
+    "safeZone": {
+      "xMm": 3, "yMm": 3,
+      "widthMm": 65, "heightMm": 140
+    },
+    "dpi": 300,
+    "outputFormat": "PNG",
+    "notes": "Safe zone is 65x140mm. Bleed of 3mm on all sides will be cut by printer. Never place image outside safe zone."
+  },
+
+  "constraints": {
+    "maxFileSizeMB": 10,
+    "allowedFormats": ["jpg", "jpeg", "png"],
+    "minRecommendedWidthPx": 768,
+    "minRecommendedHeightPx": 1654
+  }
+}
