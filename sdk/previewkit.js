@@ -1,8 +1,9 @@
 /**
- * PreviewKit SDK v2.0.0
+ * PreviewKit SDK v2.1.0
  *
  * Modal-based photo customiser — drag · pinch-zoom · mobile-first
- * Drop-in: zero dependencies, works with Shopify / WooCommerce / plain HTML.
+ * Drop-in: renders a single "Customize" CTA button; vendor's product images stay untouched.
+ * Works with Shopify / WooCommerce / plain HTML.
  *
  * Usage:
  *   PreviewKit.init({ container:'#pk', templateId:'phonecase_iphone17', apiKey:'pk_live_…' });
@@ -11,7 +12,7 @@
 (function (root) {
   'use strict';
 
-  var SDK_VERSION = '2.0.0';
+  var SDK_VERSION = '2.1.0';
   var DEFAULT_URL = 'http://localhost:8080';
   var SCALE_MIN   = 1.0;
   var SCALE_MAX   = 4.0;
@@ -25,32 +26,26 @@
       'color:#0a0a0a;line-height:1;user-select:none;-webkit-user-select:none;',
       '-webkit-tap-highlight-color:transparent;}',
 
-    /* ── Trigger card ── */
-    '.pk-trigger-card{',
-      'background:linear-gradient(150deg,#0e0e1c 0%,#16162e 55%,#1c1c38 100%);',
-      'border-radius:22px;padding:36px 24px 28px;',
-      'display:flex;flex-direction:column;align-items:center;gap:28px;',
-      'border:1px solid rgba(255,255,255,0.07);',
-      'box-shadow:0 4px 32px rgba(0,0,0,0.22),0 1px 6px rgba(0,0,0,0.12);',
-      'cursor:pointer;transition:transform 0.22s,box-shadow 0.22s;',
-    '}',
-    '.pk-trigger-card:hover{transform:translateY(-3px);',
-      'box-shadow:0 12px 40px rgba(0,0,0,0.28),0 2px 10px rgba(0,0,0,0.16);}',
-    '.pk-trigger-canvas{display:block;border-radius:18px;',
-      'box-shadow:0 16px 48px rgba(0,0,0,0.6),0 4px 16px rgba(0,0,0,0.4);}',
-    '.pk-trigger-label{font-size:11px;font-weight:500;letter-spacing:0.3px;',
-      'color:rgba(255,255,255,0.38);text-align:center;}',
+    /* ── Trigger button (standalone, no card) ── */
     '.pk-open-btn{',
+      'display:inline-flex;align-items:center;justify-content:center;gap:9px;',
       'width:100%;padding:15px 20px;border:none;border-radius:14px;',
       'background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);',
-      'color:#fff;font-size:14px;font-weight:600;letter-spacing:-0.1px;',
-      'cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;',
-      'box-shadow:0 4px 20px rgba(99,102,241,0.45),0 1px 4px rgba(99,102,241,0.2);',
-      'transition:transform 0.15s,box-shadow 0.15s;',
+      'color:#fff;font-size:15px;font-weight:600;letter-spacing:-0.1px;',
+      'cursor:pointer;',
+      'box-shadow:0 4px 20px rgba(99,102,241,0.38),0 1px 4px rgba(99,102,241,0.18);',
+      'transition:transform 0.15s,box-shadow 0.15s,background 0.2s;',
+      'position:relative;overflow:hidden;',
     '}',
-    '.pk-open-btn:hover{transform:translateY(-1px);box-shadow:0 8px 28px rgba(99,102,241,0.55);}',
+    '.pk-open-btn::before{',
+      'content:"";position:absolute;inset:0;',
+      'background:linear-gradient(135deg,rgba(255,255,255,0.10) 0%,transparent 60%);',
+      'pointer-events:none;',
+    '}',
+    '.pk-open-btn:hover{transform:translateY(-2px);',
+      'box-shadow:0 8px 28px rgba(99,102,241,0.52),0 2px 8px rgba(99,102,241,0.2);}',
     '.pk-open-btn:active{transform:translateY(0);}',
-    '.pk-trigger-confirmed .pk-open-btn{',
+    '.pk-open-btn.pk-btn-done{',
       'background:linear-gradient(135deg,#10b981,#059669);',
       'box-shadow:0 4px 20px rgba(16,185,129,0.4);}',
 
@@ -284,7 +279,6 @@
     this.template      = null;
     this.canvas        = null;
     this.ctx           = null;
-    this._triggerCtx   = null;
     this.userImage     = null;
     this.userFile      = null;
     this.uploadId      = null;
@@ -414,66 +408,32 @@
     },
 
     /* ─────────────────────────────────────────────────────────────────────────
-       TRIGGER CARD
+       TRIGGER BUTTON
+       The vendor's own product images stay untouched on their page.
+       We inject only a "Customize Your Case" button into the container.
     ───────────────────────────────────────────────────────────────────────── */
     _renderTrigger: function () {
       var self = this;
       var el   = this.container;
-      var t    = this.template;
 
       el.innerHTML =
-        '<div class="pk-trigger-card">' +
-          '<canvas class="pk-trigger-canvas"></canvas>' +
-          '<button class="pk-open-btn">' +
-            _svgWand() + 'Customize Your Case' +
-          '</button>' +
-        '</div>';
+        '<button class="pk-open-btn">' +
+          _svgWand() + 'Customize Your Case' +
+        '</button>';
 
       el.querySelector('.pk-open-btn').addEventListener('click', function () {
         self._openModal();
       });
-
-      /* Size trigger canvas */
-      var cvs  = el.querySelector('.pk-trigger-canvas');
-      var cW   = el.offsetWidth || 280;
-      var tW   = Math.min(180, Math.round(cW * 0.48));
-      var tH   = Math.round(tW * t.canvas.height / t.canvas.width);
-      cvs.width  = t.canvas.width;
-      cvs.height = t.canvas.height;
-      cvs.style.width  = tW + 'px';
-      cvs.style.height = tH + 'px';
-      this._triggerCtx = cvs.getContext('2d');
-      this._drawTrigger();
     },
 
-    _drawTrigger: function () {
-      var ctx = this._triggerCtx;
-      if (!ctx) return;
-      var t = this.template;
-      ctx.clearRect(0, 0, t.canvas.width, t.canvas.height);
-      if (t.type === 'overlay') {
-        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, t.canvas.width, t.canvas.height);
-        var z = this._zone();
-        if (this.userImage) { this._drawImg(ctx, z); }
-        else                 { this._placeholder(ctx, z, true); }
-        if (this.overlayImage) ctx.drawImage(this.overlayImage, 0, 0, t.canvas.width, t.canvas.height);
-      } else {
-        ctx.fillStyle = '#f0f0f5'; ctx.fillRect(0, 0, t.canvas.width, t.canvas.height);
-        this._drawCase(ctx, t);
-        var z2 = this._zone();
-        if (this.userImage) { this._drawImg(ctx, z2); }
-        else                 { this._placeholder(ctx, z2, false); }
-        if (t.camera)                 this._drawCamera(ctx, t.camera);
-        if (t.buttons && t.phoneCase) this._drawButtons(ctx, t.phoneCase, t.buttons);
-        if (t.port    && t.phoneCase) this._drawPort(ctx, t.phoneCase, t.port);
-      }
-    },
+    /* No-op — trigger has no canvas to redraw */
+    _drawTrigger: function () {},
 
     _updateTriggerDone: function () {
       var btn = this.container.querySelector('.pk-open-btn');
       if (!btn) return;
-      this.container.querySelector('.pk-trigger-card').classList.add('pk-trigger-confirmed');
-      btn.innerHTML = _svg('check', 15, 15, '#fff') + 'Design Saved';
+      btn.classList.add('pk-btn-done');
+      btn.innerHTML = _svg('check', 16, 16, '#fff') + 'Design Saved';
     },
 
     /* ─────────────────────────────────────────────────────────────────────────

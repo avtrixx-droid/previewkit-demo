@@ -75,13 +75,50 @@
       .product { grid-template-columns: 1fr 1fr; align-items: start; }
     }
 
-    /* ── Left column: customiser entry ── */
-    #pk-widget {
-      /* SDK renders the trigger card — no extra wrapper styling needed */
+    /* ── Left column: product images ── */
+    .product-gallery {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: sticky;
+      top: 70px;
     }
+    .gallery-main {
+      width: 100%;
+      aspect-ratio: 1 / 1.12;
+      border-radius: 20px;
+      overflow: hidden;
+      background: linear-gradient(145deg, #f0f0f8 0%, #e4e4ef 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+    }
+    .gallery-thumbs {
+      display: flex;
+      gap: 8px;
+    }
+    .gallery-thumb {
+      flex: 1;
+      aspect-ratio: 1 / 1;
+      border-radius: 10px;
+      background: linear-gradient(145deg, #f0f0f8 0%, #e4e4ef 100%);
+      border: 1.5px solid transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color 0.15s;
+      overflow: hidden;
+    }
+    .gallery-thumb:first-child { border-color: var(--indigo); }
+    .gallery-thumb:hover { border-color: var(--indigo); }
 
     /* ── Product info (right column) ── */
     .product-info { display: flex; flex-direction: column; gap: 22px; }
+
+    /* ── Customize CTA wrapper ── */
+    #pk-widget { display: block; }
 
     .product-category {
       font-size: 11px; font-weight: 700; color: var(--indigo);
@@ -231,10 +268,59 @@
 
     <div class="product">
 
-      <!-- Left: PreviewKit trigger (SDK renders here) -->
-      <div id="pk-widget"></div>
+      <!-- Left: product image gallery (vendor's own images — untouched by SDK) -->
+      <div class="product-gallery">
+        <div class="gallery-main">
+          <!-- Illustrated phone case product image -->
+          <svg width="200" height="340" viewBox="0 0 200 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="20" y="10" width="160" height="320" rx="28" fill="#e8e8f4" stroke="#d0d0e0" stroke-width="1.5"/>
+            <rect x="30" y="20" width="140" height="300" rx="20" fill="#f7f7fc"/>
+            <!-- Abstract gradient art fill -->
+            <defs>
+              <radialGradient id="g1" cx="50%" cy="40%" r="60%">
+                <stop offset="0%" stop-color="#a5b4fc"/>
+                <stop offset="100%" stop-color="#6366f1" stop-opacity="0.6"/>
+              </radialGradient>
+              <radialGradient id="g2" cx="70%" cy="80%" r="50%">
+                <stop offset="0%" stop-color="#f0abfc"/>
+                <stop offset="100%" stop-color="#c026d3" stop-opacity="0.4"/>
+              </radialGradient>
+            </defs>
+            <rect x="30" y="20" width="140" height="300" rx="20" fill="url(#g1)" opacity="0.35"/>
+            <rect x="30" y="20" width="140" height="300" rx="20" fill="url(#g2)" opacity="0.25"/>
+            <!-- Camera bump -->
+            <rect x="50" y="30" width="48" height="48" rx="12" fill="#d8d8ec" stroke="#c8c8dc" stroke-width="1"/>
+            <circle cx="62" cy="44" r="8" fill="#b0b0cc" stroke="#a0a0bc" stroke-width="1"/>
+            <circle cx="62" cy="44" r="5" fill="#8888aa"/>
+            <circle cx="82" cy="44" r="8" fill="#b0b0cc" stroke="#a0a0bc" stroke-width="1"/>
+            <circle cx="82" cy="44" r="5" fill="#8888aa"/>
+            <circle cx="62" cy="64" r="8" fill="#b0b0cc" stroke="#a0a0bc" stroke-width="1"/>
+            <circle cx="62" cy="64" r="5" fill="#8888aa"/>
+            <!-- Side buttons -->
+            <rect x="17" y="90" width="4" height="28" rx="2" fill="#c8c8d8"/>
+            <rect x="17" y="128" width="4" height="20" rx="2" fill="#c8c8d8"/>
+            <rect x="179" y="110" width="4" height="36" rx="2" fill="#c8c8d8"/>
+            <!-- Bottom port -->
+            <rect x="82" y="326" width="36" height="5" rx="2.5" fill="#c8c8d8"/>
+          </svg>
+        </div>
+        <div class="gallery-thumbs">
+          <div class="gallery-thumb">
+            <svg width="40" height="68" viewBox="0 0 200 340" fill="none"><rect x="20" y="10" width="160" height="320" rx="28" fill="#e8e8f4" stroke="#d0d0e0" stroke-width="2"/><rect x="30" y="20" width="140" height="300" rx="20" fill="url(#g1)" opacity="0.35"/></svg>
+          </div>
+          <div class="gallery-thumb">
+            <svg width="40" height="68" viewBox="0 0 200 340" fill="none"><rect x="20" y="10" width="160" height="320" rx="28" fill="#e4f0ff" stroke="#d0ddf0" stroke-width="2"/><rect x="30" y="20" width="140" height="300" rx="20" fill="#93c5fd" opacity="0.3"/></svg>
+          </div>
+          <div class="gallery-thumb">
+            <svg width="40" height="68" viewBox="0 0 200 340" fill="none"><rect x="20" y="10" width="160" height="320" rx="28" fill="#f0fff4" stroke="#d0e8d8" stroke-width="2"/><rect x="30" y="20" width="140" height="300" rx="20" fill="#6ee7b7" opacity="0.3"/></svg>
+          </div>
+          <div class="gallery-thumb">
+            <svg width="40" height="68" viewBox="0 0 200 340" fill="none"><rect x="20" y="10" width="160" height="320" rx="28" fill="#fdf4ff" stroke="#e8d0f0" stroke-width="2"/><rect x="30" y="20" width="140" height="300" rx="20" fill="#f0abfc" opacity="0.3"/></svg>
+          </div>
+        </div>
+      </div>
 
-      <!-- Right: product info -->
+      <!-- Right: product info + Customize CTA (SDK renders here) -->
       <div class="product-info">
         <div>
           <p class="product-category">Custom Phone Case</p>
@@ -303,6 +389,9 @@
         <p class="product-desc">
           Upload any photo — your pet, a holiday snap, a portrait. Use the customiser to perfectly position your image. Confirm your design and a high-resolution print file goes straight to production.
         </p>
+
+        <!-- ▼ PreviewKit Customize button renders here ▼ -->
+        <div id="pk-widget"></div>
 
         <!-- Trust badges -->
         <div class="trust-row">
