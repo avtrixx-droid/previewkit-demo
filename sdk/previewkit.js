@@ -20,17 +20,17 @@
 
   // Universal phone-back fallback image (used when no vendorTemplate is provided)
   var FALLBACK_IMAGE_URL = 'https://res.cloudinary.com/dtjbyme7m/image/upload/v1777397169/Iphone17_bp99hm.webp';
-  // Photo-zones over the fallback image (900×900 letterboxed to 360×360 at y=133 on a 360×626 canvas)
-  // Tune by eye. Values are fractions (0–1) of the canvas width/height.
+  // Photo-zone over the fallback image, expressed in IMAGE-relative fractions (0–1
+   // of the natural image size). This keeps it aligned regardless of canvas size.
+   // The fallback image (Iphone17_bp99hm.webp) is square; the phone occupies roughly
+   // x: 32%..68%, y: 8%..92% of the image. Full Back covers the whole case.
   var FALLBACK_LAYOUT_ZONES = {
-    // Full case back — image overlays the entire phone, including over the camera area.
-    full_back:   { xPct: 0.30, yPct: 0.264, wPct: 0.40, hPct: 0.472 },
-    // Centered art — smaller area in the middle of the case body.
-    centered:    { xPct: 0.36, yPct: 0.40,  wPct: 0.28, hPct: 0.30  },
-    // Below-camera only — photo sits in the white case body under the camera plateau.
-    skip_camera: { xPct: 0.32, yPct: 0.44,  wPct: 0.36, hPct: 0.31  }
+    // Full Back = entire phone case rectangle (transparent case-body in the image
+    // lets the photo show through; opaque camera island stays visible on top)
+    full_back:   { xPctImg: 0.32, yPctImg: 0.08, wPctImg: 0.36, hPctImg: 0.84 },
+    // No Camera = photo sits BELOW the camera plateau only (case body below the bump)
+    skip_camera: { xPctImg: 0.32, yPctImg: 0.40, wPctImg: 0.36, hPctImg: 0.52 }
   };
-  var FALLBACK_PHOTO_ZONE = FALLBACK_LAYOUT_ZONES.skip_camera;
 
   /* ─── CSS ─────────────────────────────────────────────────────────────────── */
   var CSS = [
@@ -987,8 +987,7 @@
           '<div class="pk-section-label">Print layout</div>' +
           '<div class="pk-layouts">' +
           _lpill('full_back', 'Full Back', _svgLayoutFull(), true) +
-          _lpill('centered', 'Centered', _svgLayoutCenter(), false) +
-          _lpill('skip_camera', 'No Camera', _svgLayoutSkip(), false) +
+          _lpill('skip_camera', 'Below Camera', _svgLayoutSkip(), false) +
           '</div>' +
           '</div>'
           : '') +
@@ -1137,12 +1136,21 @@
         }
         return this._normalizeZone(t.photoZone, t.canvas.width, t.canvas.height);
       }
-      // Fallback image mode → zone is selected by the Print Layout buttons
+      // Fallback image mode → zone is image-relative (so it stays aligned regardless of canvas size)
       if (t.type === 'fallback_image') {
         var ly = this.selectedLayout || 'full_back';
-        var pz = (t.photoZone)
-          || (FALLBACK_LAYOUT_ZONES[ly] || FALLBACK_LAYOUT_ZONES.full_back);
-        return this._normalizeZone(pz, t.canvas.width, t.canvas.height);
+        var pz = FALLBACK_LAYOUT_ZONES[ly] || FALLBACK_LAYOUT_ZONES.full_back;
+        var ir = this._imgRect();
+        if (ir && pz.xPctImg != null) {
+          return {
+            x: Math.round(ir.x + pz.xPctImg * ir.w),
+            y: Math.round(ir.y + pz.yPctImg * ir.h),
+            w: Math.round(pz.wPctImg * ir.w),
+            h: Math.round(pz.hPctImg * ir.h)
+          };
+        }
+        // Image not yet loaded → return whole canvas as a placeholder zone
+        return { x: 0, y: 0, w: t.canvas.width, h: t.canvas.height };
       }
       var pa = this._area();
       return pa ? { x: pa.x, y: pa.y, w: pa.width, h: pa.height }
@@ -1436,18 +1444,30 @@
 
     /* Universal phone-back image fallback: case image is the canvas; user photo
        is drawn ON TOP, clipped to the photo zone (white case body region). */
+    /* Letterbox rect of the fallback image on the canvas (used by both render & zone math). */
+    _imgRect: function () {
+      var t = this.template, img = this.fallbackImage;
+      if (!t || !img) return null;
+      var cw = t.canvas.width, ch = t.canvas.height;
+      var s = Math.min(cw / img.width, ch / img.height);
+      var w = img.width * s, h = img.height * s;
+      return { x: (cw - w) / 2, y: (ch - h) / 2, w: w, h: h };
+    },
+
     _renderFallbackImage: function (ctx, t) {
       var cw = t.canvas.width, ch = t.canvas.height;
       ctx.fillStyle = '#f0f0f5'; ctx.fillRect(0, 0, cw, ch);
 
-      // Draw the case image first as the full background
+      // 1. Draw user photo (or placeholder) UNDER the case image, clipped to the photo zone
+      var z = this._zone();
+      if (this.userImage) { this._drawImg(ctx, z); }
+      else { this._placeholder(ctx, z, true); }
+
+      // 2. Draw the transparent case image ON TOP — the camera island is opaque
+      //    (covers the photo), the case body is transparent (photo shows through).
       if (this.fallbackImage) {
-        // Letterbox-fit the image into the canvas, preserving aspect ratio
-        var img = this.fallbackImage;
-        var s = Math.min(cw / img.width, ch / img.height);
-        var dw = img.width * s, dh = img.height * s;
-        var dx = (cw - dw) / 2, dy = (ch - dh) / 2;
-        ctx.drawImage(img, dx, dy, dw, dh);
+        var ir = this._imgRect();
+        ctx.drawImage(this.fallbackImage, ir.x, ir.y, ir.w, ir.h);
       } else if (t.overlayUrl && !this._fallbackLoad) {
         this._fallbackLoad = true;
         var self = this, im = new Image();
@@ -1456,11 +1476,6 @@
         im.onerror = function () { self._fallbackLoad = false; console.warn('PreviewKit: fallback image failed to load'); };
         im.src = t.overlayUrl;
       }
-
-      // Draw user photo (or placeholder) on top, clipped to the photo zone
-      var z = this._zone();
-      if (this.userImage) { this._drawImg(ctx, z); }
-      else { this._placeholder(ctx, z, true); }
     },
 
     _renderOverlay: function (ctx, t) {
