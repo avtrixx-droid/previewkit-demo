@@ -20,11 +20,17 @@
 
   // Universal phone-back fallback image (used when no vendorTemplate is provided)
   var FALLBACK_IMAGE_URL = 'https://res.cloudinary.com/dtjbyme7m/image/upload/v1777397169/Iphone17_bp99hm.webp';
-  // Initial photo-zone over the fallback image (white case body) — tune by eye.
-  // The fallback image is 900×900; on a 360×626 canvas it letterboxes to 360×360 at y=133.
-  // Photo area within the image: x≈32%–67%, y≈40%–82% of image height.
-  // Translated to canvas fractions: x: 115/360..245/360, y: (133 + 144)/626..(133 + 295)/626.
-  var FALLBACK_PHOTO_ZONE = { xPct: 0.32, yPct: 0.44, wPct: 0.36, hPct: 0.31 };
+  // Photo-zones over the fallback image (900×900 letterboxed to 360×360 at y=133 on a 360×626 canvas)
+  // Tune by eye. Values are fractions (0–1) of the canvas width/height.
+  var FALLBACK_LAYOUT_ZONES = {
+    // Full case back — image overlays the entire phone, including over the camera area.
+    full_back:   { xPct: 0.30, yPct: 0.264, wPct: 0.40, hPct: 0.472 },
+    // Centered art — smaller area in the middle of the case body.
+    centered:    { xPct: 0.36, yPct: 0.40,  wPct: 0.28, hPct: 0.30  },
+    // Below-camera only — photo sits in the white case body under the camera plateau.
+    skip_camera: { xPct: 0.32, yPct: 0.44,  wPct: 0.36, hPct: 0.31  }
+  };
+  var FALLBACK_PHOTO_ZONE = FALLBACK_LAYOUT_ZONES.skip_camera;
 
   /* ─── CSS ─────────────────────────────────────────────────────────────────── */
   var CSS = [
@@ -434,29 +440,28 @@
           computed.canvas.height = api.model.canvasHeightPx;
         }
 
-        // Attach vendor template data if present
-        if (vt && vt.templateJson) {
+        // Decide rendering mode based on vendorTemplate + photoZones
+        var hasVendorZone = vt && vt.templateJson
+          && vt.templateJson.photoZones && vt.templateJson.photoZones.length;
+        if (hasVendorZone) {
+          // Vendor template defines a real photo zone → constrain preview to that zone, ignore layout buttons
           var tj = vt.templateJson;
           computed.type = tj.type || 'overlay';
           computed.overlayUrl = (tj.overlay && tj.overlay.image_url) || null;
-          computed.photoZones = tj.photoZones || null;
-          // Guard empty array → null (so _zone() can fall through to safeZone/printArea)
-          computed.photoZone = (tj.photoZones && tj.photoZones.length) ? tj.photoZones[0] : null;
-          // Fallback to model.safeZoneJson if vendor template defines no photoZone
-          if (!computed.photoZone && api.model && api.model.safeZoneJson) {
-            computed.photoZone = api.model.safeZoneJson;
-          }
+          computed.photoZones = tj.photoZones;
+          computed.photoZone = tj.photoZones[0];
         } else if (this.useProgrammaticCase) {
           // Opt-in: keep the programmatic case/camera renderer
           computed.type = 'programmatic';
           computed.overlayUrl = null;
           computed.photoZones = null;
         } else {
-          // Default: render universal phone-back fallback image with a photo zone over the white area
+          // No vendor zone: render universal phone-back fallback image
+          // and let the Print Layout buttons pick the photo zone over it.
           computed.type = 'fallback_image';
           computed.overlayUrl = this.fallbackImageUrl;
           computed.photoZones = null;
-          computed.photoZone = (api.model && api.model.safeZoneJson) || FALLBACK_PHOTO_ZONE;
+          computed.photoZone = null; // resolved per-render via selectedLayout
         }
         return computed;
       }
@@ -1124,12 +1129,20 @@
 
     _zone: function () {
       var t = this.template;
-      if (t.type === 'overlay' || t.type === 'fallback_image') {
+      // Vendor overlay with a real photoZone → strict: limit preview to that zone
+      if (t.type === 'overlay') {
         if (!t.photoZone) {
-          console.warn('PreviewKit: ' + t.type + ' mode but no photoZone defined. Falling back to canvas.');
+          console.warn('PreviewKit: overlay mode but no photoZone defined. Falling back to canvas.');
           return { x: 0, y: 0, w: t.canvas.width, h: t.canvas.height };
         }
         return this._normalizeZone(t.photoZone, t.canvas.width, t.canvas.height);
+      }
+      // Fallback image mode → zone is selected by the Print Layout buttons
+      if (t.type === 'fallback_image') {
+        var ly = this.selectedLayout || 'full_back';
+        var pz = (t.photoZone)
+          || (FALLBACK_LAYOUT_ZONES[ly] || FALLBACK_LAYOUT_ZONES.full_back);
+        return this._normalizeZone(pz, t.canvas.width, t.canvas.height);
       }
       var pa = this._area();
       return pa ? { x: pa.x, y: pa.y, w: pa.width, h: pa.height }
