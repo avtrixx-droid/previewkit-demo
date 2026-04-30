@@ -12,11 +12,19 @@
 (function (root) {
   'use strict';
 
-  var SDK_VERSION = '2.2.0';
+  var SDK_VERSION = '2.3.0';
   var DEFAULT_URL = 'http://localhost:8080';
   var SCALE_MIN = 1.0;
   var SCALE_MAX = 4.0;
   var SCALE_STEP = 0.25;
+
+  // Universal phone-back fallback image (used when no vendorTemplate is provided)
+  var FALLBACK_IMAGE_URL = 'https://res.cloudinary.com/dtjbyme7m/image/upload/v1777397169/Iphone17_bp99hm.webp';
+  // Initial photo-zone over the fallback image (white case body) — tune by eye.
+  // The fallback image is 900×900; on a 360×626 canvas it letterboxes to 360×360 at y=133.
+  // Photo area within the image: x≈32%–67%, y≈40%–82% of image height.
+  // Translated to canvas fractions: x: 115/360..245/360, y: (133 + 144)/626..(133 + 295)/626.
+  var FALLBACK_PHOTO_ZONE = { xPct: 0.32, yPct: 0.44, wPct: 0.36, hPct: 0.31 };
 
   /* ─── CSS ─────────────────────────────────────────────────────────────────── */
   var CSS = [
@@ -302,6 +310,10 @@
     this.apiKey = cfg.apiKey || null;
     this.modelKey = cfg.modelKey || null;           // e.g. "iphone_17"
     this.templateKey = null;                           // set from vendorTemplate if present
+    // When true, render programmatic case/camera/buttons even without a vendorTemplate.
+    // Default false → fall back to the universal phone image when no vendorTemplate exists.
+    this.useProgrammaticCase = !!cfg.useProgrammaticCase;
+    this.fallbackImageUrl = cfg.fallbackImageUrl || FALLBACK_IMAGE_URL;
     this.template = null;
     this.canvas = null;
     this.ctx = null;
@@ -315,6 +327,8 @@
     this._pinch = null;
     this.overlayImage = null;
     this._overlayLoad = false;
+    this.fallbackImage = null;
+    this._fallbackLoad = false;
     this.selectedLayout = 'full_back';
     this.listeners = {};
     this.container = null;
@@ -381,6 +395,7 @@
       this.uploadId = null;
       this.overlayImage = null;
       this._overlayLoad = false;
+      // keep fallbackImage cached across reset() — it never changes per session
       this.imageOffsetX = 0;
       this.imageOffsetY = 0;
       this.imageScale = 1.0;
@@ -413,17 +428,35 @@
         var computed = this._computeFromSpecs(ds);
         computed.templateKey = api.templateKey || (t && (t.templateKey || t.templateId)) || 'dynamic';
 
+        // Override canvas size with API-provided dimensions if available
+        if (api.model && api.model.canvasWidthPx && api.model.canvasHeightPx) {
+          computed.canvas.width = api.model.canvasWidthPx;
+          computed.canvas.height = api.model.canvasHeightPx;
+        }
+
         // Attach vendor template data if present
         if (vt && vt.templateJson) {
           var tj = vt.templateJson;
           computed.type = tj.type || 'overlay';
           computed.overlayUrl = (tj.overlay && tj.overlay.image_url) || null;
           computed.photoZones = tj.photoZones || null;
-          computed.photoZone = tj.photoZones ? tj.photoZones[0] : null;
-        } else {
+          // Guard empty array → null (so _zone() can fall through to safeZone/printArea)
+          computed.photoZone = (tj.photoZones && tj.photoZones.length) ? tj.photoZones[0] : null;
+          // Fallback to model.safeZoneJson if vendor template defines no photoZone
+          if (!computed.photoZone && api.model && api.model.safeZoneJson) {
+            computed.photoZone = api.model.safeZoneJson;
+          }
+        } else if (this.useProgrammaticCase) {
+          // Opt-in: keep the programmatic case/camera renderer
           computed.type = 'programmatic';
           computed.overlayUrl = null;
           computed.photoZones = null;
+        } else {
+          // Default: render universal phone-back fallback image with a photo zone over the white area
+          computed.type = 'fallback_image';
+          computed.overlayUrl = this.fallbackImageUrl;
+          computed.photoZones = null;
+          computed.photoZone = (api.model && api.model.safeZoneJson) || FALLBACK_PHOTO_ZONE;
         }
         return computed;
       }
@@ -1091,30 +1124,48 @@
 
     _zone: function () {
       var t = this.template;
-      if (t.type === 'overlay') {
+      if (t.type === 'overlay' || t.type === 'fallback_image') {
         if (!t.photoZone) {
-          console.warn('PreviewKit: overlay mode but no photoZone defined. Falling back to canvas.');
+          console.warn('PreviewKit: ' + t.type + ' mode but no photoZone defined. Falling back to canvas.');
           return { x: 0, y: 0, w: t.canvas.width, h: t.canvas.height };
         }
-        var pz = t.photoZone, cw = t.canvas.width, ch = t.canvas.height;
-        var xPct = pz.xPct ?? pz.x_pct ?? 0;
-        var yPct = pz.yPct ?? pz.y_pct ?? 0;
-        var wPct = pz.wPct ?? pz.width_pct ?? 1;
-        var hPct = pz.hPct ?? pz.height_pct ?? 1;
-        if (xPct > 1) console.warn('photoZone.xPct should be 0–1, got:', xPct);
-        if (yPct > 1) console.warn('photoZone.yPct should be 0–1, got:', yPct);
-        if (wPct > 1) console.warn('photoZone.wPct should be 0–1, got:', wPct);
-        if (hPct > 1) console.warn('photoZone.hPct should be 0–1, got:', hPct);
-        return {
-          x: Math.round(xPct * cw),
-          y: Math.round(yPct * ch),
-          w: Math.round(wPct * cw),
-          h: Math.round(hPct * ch)
-        };
+        return this._normalizeZone(t.photoZone, t.canvas.width, t.canvas.height);
       }
       var pa = this._area();
       return pa ? { x: pa.x, y: pa.y, w: pa.width, h: pa.height }
         : { x: 0, y: 0, w: t.canvas.width, h: t.canvas.height };
+    },
+
+    /* Resolve a zone definition to absolute canvas pixels.
+       Accepts:
+         - fractional:  { xPct, yPct, wPct, hPct }            values 0–1
+         - percentage:  { xPct, yPct, wPct, hPct }            values 0–100   (auto-detected)
+         - absolute:    { xPx, yPx, widthPx, heightPx }       canvas pixels
+         - snake_case:  { x_pct, y_pct, width_pct, height_pct } (legacy)
+       Heuristic: if any *Pct value is > 1, treat them as percentage (0–100). Else fraction (0–1). */
+    _normalizeZone: function (pz, cw, ch) {
+      var hasPx = pz.xPx != null || pz.widthPx != null || pz.heightPx != null;
+      if (hasPx) {
+        return {
+          x: Math.round(pz.xPx || 0),
+          y: Math.round(pz.yPx || 0),
+          w: Math.round(pz.widthPx || cw),
+          h: Math.round(pz.heightPx || ch)
+        };
+      }
+      var xPct = pz.xPct != null ? pz.xPct : (pz.x_pct != null ? pz.x_pct : 0);
+      var yPct = pz.yPct != null ? pz.yPct : (pz.y_pct != null ? pz.y_pct : 0);
+      var wPct = pz.wPct != null ? pz.wPct : (pz.width_pct != null ? pz.width_pct : 1);
+      var hPct = pz.hPct != null ? pz.hPct : (pz.height_pct != null ? pz.height_pct : 1);
+      // Auto-detect: if any value exceeds 1, assume percentage scale (0–100)
+      var anyOverOne = xPct > 1 || yPct > 1 || wPct > 1 || hPct > 1;
+      var div = anyOverOne ? 100 : 1;
+      return {
+        x: Math.round((xPct / div) * cw),
+        y: Math.round((yPct / div) * ch),
+        w: Math.round((wPct / div) * cw),
+        h: Math.round((hPct / div) * ch)
+      };
     },
 
     _area: function () {
@@ -1365,8 +1416,38 @@
       if (!ctx) return;
       ctx.clearRect(0, 0, t.canvas.width, t.canvas.height);
       if (t.type === 'overlay') { this._renderOverlay(ctx, t); }
+      else if (t.type === 'fallback_image') { this._renderFallbackImage(ctx, t); }
       else { this._renderProgrammatic(ctx, t); }
       this._drawTrigger();
+    },
+
+    /* Universal phone-back image fallback: case image is the canvas; user photo
+       is drawn ON TOP, clipped to the photo zone (white case body region). */
+    _renderFallbackImage: function (ctx, t) {
+      var cw = t.canvas.width, ch = t.canvas.height;
+      ctx.fillStyle = '#f0f0f5'; ctx.fillRect(0, 0, cw, ch);
+
+      // Draw the case image first as the full background
+      if (this.fallbackImage) {
+        // Letterbox-fit the image into the canvas, preserving aspect ratio
+        var img = this.fallbackImage;
+        var s = Math.min(cw / img.width, ch / img.height);
+        var dw = img.width * s, dh = img.height * s;
+        var dx = (cw - dw) / 2, dy = (ch - dh) / 2;
+        ctx.drawImage(img, dx, dy, dw, dh);
+      } else if (t.overlayUrl && !this._fallbackLoad) {
+        this._fallbackLoad = true;
+        var self = this, im = new Image();
+        im.crossOrigin = 'anonymous';
+        im.onload = function () { self.fallbackImage = im; self._fallbackLoad = false; self._render(); };
+        im.onerror = function () { self._fallbackLoad = false; console.warn('PreviewKit: fallback image failed to load'); };
+        im.src = t.overlayUrl;
+      }
+
+      // Draw user photo (or placeholder) on top, clipped to the photo zone
+      var z = this._zone();
+      if (this.userImage) { this._drawImg(ctx, z); }
+      else { this._placeholder(ctx, z, true); }
     },
 
     _renderOverlay: function (ctx, t) {
