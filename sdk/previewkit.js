@@ -24,11 +24,17 @@
    // of the natural image size). This keeps it aligned regardless of canvas size.
    // The fallback image (Iphone17_bp99hm.webp) is square; the phone occupies roughly
    // x: 32%..68%, y: 8%..92% of the image. Full Back covers the whole case.
+  // Phone bounds within the natural fallback image (Iphone17_bp99hm.webp, 900×900).
+  // We crop the image to this rect so the phone fills the canvas tightly (no margin).
+  var FALLBACK_PHONE_BOUNDS_IMG = { xPctImg: 0.32, yPctImg: 0.08, wPctImg: 0.36, hPctImg: 0.84 };
+
+  // Photo zones expressed in IMAGE-relative fractions; converted at render time
+  // to pixels within the cropped phone-bounds rect on the canvas.
   var FALLBACK_LAYOUT_ZONES = {
-    // Full Back = entire phone case rectangle (transparent case-body in the image
-    // lets the photo show through; opaque camera island stays visible on top)
+    // Full Back = entire phone case rectangle. Transparent case-body in the image
+    // lets the photo show through; opaque camera island stays visible on top.
     full_back:   { xPctImg: 0.32, yPctImg: 0.08, wPctImg: 0.36, hPctImg: 0.84 },
-    // No Camera = photo sits BELOW the camera plateau only (case body below the bump)
+    // Below Camera = photo only below the camera plateau.
     skip_camera: { xPctImg: 0.32, yPctImg: 0.40, wPctImg: 0.36, hPctImg: 0.52 }
   };
 
@@ -434,8 +440,13 @@
         var computed = this._computeFromSpecs(ds);
         computed.templateKey = api.templateKey || (t && (t.templateKey || t.templateId)) || 'dynamic';
 
-        // Override canvas size with API-provided dimensions if available
-        if (api.model && api.model.canvasWidthPx && api.model.canvasHeightPx) {
+        // Override canvas size with API-provided dimensions if available.
+        // (Skipped for fallback_image mode below — that path sets its own canvas size
+        // matching the phone-bounds aspect to eliminate letterbox margin.)
+        var skipCanvasOverride = !(vt && vt.templateJson
+          && vt.templateJson.photoZones && vt.templateJson.photoZones.length)
+          && !this.useProgrammaticCase;
+        if (!skipCanvasOverride && api.model && api.model.canvasWidthPx && api.model.canvasHeightPx) {
           computed.canvas.width = api.model.canvasWidthPx;
           computed.canvas.height = api.model.canvasHeightPx;
         }
@@ -462,6 +473,13 @@
           computed.overlayUrl = this.fallbackImageUrl;
           computed.photoZones = null;
           computed.photoZone = null; // resolved per-render via selectedLayout
+          // Resize canvas to match the phone-bounds aspect ratio so the cropped
+          // image fills the canvas tightly (no letterbox margin).
+          var pb = FALLBACK_PHONE_BOUNDS_IMG;
+          var phoneAspect = pb.wPctImg / pb.hPctImg; // width / height
+          var targetW = 360;
+          computed.canvas.width = targetW;
+          computed.canvas.height = Math.round(targetW / phoneAspect);
         }
         return computed;
       }
@@ -1136,21 +1154,22 @@
         }
         return this._normalizeZone(t.photoZone, t.canvas.width, t.canvas.height);
       }
-      // Fallback image mode → zone is image-relative (so it stays aligned regardless of canvas size)
+      // Fallback image mode → canvas equals phone-bounds. Re-express the
+      // image-fraction zone as a phone-bounds fraction, then map to canvas pixels.
       if (t.type === 'fallback_image') {
         var ly = this.selectedLayout || 'full_back';
         var pz = FALLBACK_LAYOUT_ZONES[ly] || FALLBACK_LAYOUT_ZONES.full_back;
-        var ir = this._imgRect();
-        if (ir && pz.xPctImg != null) {
-          return {
-            x: Math.round(ir.x + pz.xPctImg * ir.w),
-            y: Math.round(ir.y + pz.yPctImg * ir.h),
-            w: Math.round(pz.wPctImg * ir.w),
-            h: Math.round(pz.hPctImg * ir.h)
-          };
-        }
-        // Image not yet loaded → return whole canvas as a placeholder zone
-        return { x: 0, y: 0, w: t.canvas.width, h: t.canvas.height };
+        var pb = FALLBACK_PHONE_BOUNDS_IMG;
+        var fx = (pz.xPctImg - pb.xPctImg) / pb.wPctImg;
+        var fy = (pz.yPctImg - pb.yPctImg) / pb.hPctImg;
+        var fw = pz.wPctImg / pb.wPctImg;
+        var fh = pz.hPctImg / pb.hPctImg;
+        return {
+          x: Math.round(fx * t.canvas.width),
+          y: Math.round(fy * t.canvas.height),
+          w: Math.round(fw * t.canvas.width),
+          h: Math.round(fh * t.canvas.height)
+        };
       }
       var pa = this._area();
       return pa ? { x: pa.x, y: pa.y, w: pa.width, h: pa.height }
@@ -1444,30 +1463,34 @@
 
     /* Universal phone-back image fallback: case image is the canvas; user photo
        is drawn ON TOP, clipped to the photo zone (white case body region). */
-    /* Letterbox rect of the fallback image on the canvas (used by both render & zone math). */
+    /* Phone-bounds rect on the canvas — i.e. the region the cropped image fills.
+       In fallback mode we resize the canvas to match the phone-bounds aspect, so
+       the cropped image fills the entire canvas: rect = {0,0,cw,ch}. */
     _imgRect: function () {
-      var t = this.template, img = this.fallbackImage;
-      if (!t || !img) return null;
-      var cw = t.canvas.width, ch = t.canvas.height;
-      var s = Math.min(cw / img.width, ch / img.height);
-      var w = img.width * s, h = img.height * s;
-      return { x: (cw - w) / 2, y: (ch - h) / 2, w: w, h: h };
+      var t = this.template;
+      if (!t) return null;
+      return { x: 0, y: 0, w: t.canvas.width, h: t.canvas.height };
     },
 
     _renderFallbackImage: function (ctx, t) {
       var cw = t.canvas.width, ch = t.canvas.height;
-      ctx.fillStyle = '#f0f0f5'; ctx.fillRect(0, 0, cw, ch);
+      ctx.clearRect(0, 0, cw, ch);
 
       // 1. Draw user photo (or placeholder) UNDER the case image, clipped to the photo zone
       var z = this._zone();
       if (this.userImage) { this._drawImg(ctx, z); }
       else { this._placeholder(ctx, z, true); }
 
-      // 2. Draw the transparent case image ON TOP — the camera island is opaque
-      //    (covers the photo), the case body is transparent (photo shows through).
+      // 2. Draw the transparent case image ON TOP, cropped to the phone-bounds rect
+      //    inside the natural image so it fills the canvas with no margin.
       if (this.fallbackImage) {
-        var ir = this._imgRect();
-        ctx.drawImage(this.fallbackImage, ir.x, ir.y, ir.w, ir.h);
+        var img = this.fallbackImage;
+        var pb = FALLBACK_PHONE_BOUNDS_IMG;
+        var sx = pb.xPctImg * img.width;
+        var sy = pb.yPctImg * img.height;
+        var sw = pb.wPctImg * img.width;
+        var sh = pb.hPctImg * img.height;
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
       } else if (t.overlayUrl && !this._fallbackLoad) {
         this._fallbackLoad = true;
         var self = this, im = new Image();
