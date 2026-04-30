@@ -320,7 +320,8 @@
     this.config = cfg;
     this.apiUrl = (cfg.apiUrl || DEFAULT_URL).replace(/\/$/, '');
     this.apiKey = cfg.apiKey || null;
-    this.modelKey = cfg.modelKey || null;           // e.g. "iphone_17"
+    // Accept modelKey OR templateId (Shopify integration uses templateId from metafields)
+    this.modelKey = cfg.modelKey || cfg.templateId || null;           // e.g. "iphone_17"
     this.templateKey = null;                           // set from vendorTemplate if present
     // When true, render programmatic case/camera/buttons even without a vendorTemplate.
     // Default false → fall back to the universal phone image when no vendorTemplate exists.
