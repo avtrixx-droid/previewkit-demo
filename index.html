@@ -156,6 +156,15 @@
       text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px;
     }
     .model-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .brand-tab {
+      padding: 6px 16px; border-radius: 8px;
+      border: 1.5px solid var(--border);
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      cursor: pointer; background: #fff; transition: all 0.15s;
+    }
+    .brand-tab:hover { border-color: var(--indigo); color: var(--indigo); }
+    .brand-tab.active { border-color: var(--indigo); background: #eeecff; color: #4f46e5; }
+
     .model-pill {
       padding: 8px 14px; border-radius: 10px;
       border: 1.5px solid var(--border);
@@ -342,11 +351,34 @@
         <!-- Model selector -->
         <div>
           <div class="option-label">Select model</div>
-          <div class="model-pills">
-            <div class="model-pill active">iPhone 17 Pro</div>
-            <div class="model-pill">iPhone 17</div>
-            <div class="model-pill">iPhone 16 Pro</div>
-            <div class="model-pill">iPhone 16</div>
+          <!-- Brand tabs -->
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <button class="brand-tab active" data-brand="apple">Apple</button>
+            <button class="brand-tab" data-brand="samsung">Samsung</button>
+          </div>
+          <!-- Apple models -->
+          <div class="model-group" id="models-apple">
+            <div class="model-pills">
+              <div class="model-pill active" data-model="iphone_17">iPhone 17</div>
+              <div class="model-pill" data-model="iphone_16">iPhone 16</div>
+            </div>
+          </div>
+          <!-- Samsung models -->
+          <div class="model-group" id="models-samsung" style="display:none;">
+            <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:0.4px;margin-bottom:6px;">S Series</div>
+            <div class="model-pills" style="margin-bottom:10px;">
+              <div class="model-pill" data-model="samsung_s24_ultra">S24 Ultra</div>
+              <div class="model-pill" data-model="samsung_s24_plus">S24+</div>
+              <div class="model-pill" data-model="samsung_s24">S24</div>
+              <div class="model-pill" data-model="samsung_s23_ultra">S23 Ultra</div>
+              <div class="model-pill" data-model="samsung_s23">S23</div>
+              <div class="model-pill" data-model="samsung_s22">S22</div>
+            </div>
+            <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:0.4px;margin-bottom:6px;">A Series</div>
+            <div class="model-pills">
+              <div class="model-pill" data-model="samsung_a54">A54</div>
+              <div class="model-pill" data-model="samsung_a34">A34</div>
+            </div>
           </div>
         </div>
 
@@ -431,9 +463,9 @@
 <span class="t-comment">&lt;!-- 3. Init --&gt;</span>
 <span class="t-tag">&lt;script&gt;</span>
   <span class="t-obj">PreviewKit</span>.<span class="t-fn">init</span>({
-    <span class="t-key">container</span>:  <span class="t-str">"#pk-widget"</span>,
-    <span class="t-key">templateId</span>: <span class="t-str">"phonecase_iphone17"</span>,
-    <span class="t-key">apiKey</span>:     <span class="t-str">"pk_live_your_key"</span>
+    <span class="t-key">container</span>: <span class="t-str">"#pk-widget"</span>,
+    <span class="t-key">modelKey</span>:  <span class="t-str">"iphone_17"</span>,
+    <span class="t-key">apiKey</span>:    <span class="t-str">"pk_live_your_key"</span>
   });
 
   <span class="t-obj">PreviewKit</span>.<span class="t-fn">on</span>(<span class="t-str">"confirm"</span>, <span class="t-fn">function</span>(<span class="t-obj">data</span>) {
@@ -488,10 +520,10 @@
   <script src="sdk/previewkit.js"></script>
 
   <script>
-    var params     = new URLSearchParams(window.location.search);
-    var apiKey     = params.get('apiKey')     || null;
-    var apiUrl     = params.get('apiUrl')     || 'http://localhost:8080';
-    var templateId = params.get('templateId') || 'phonecase_iphone17';
+    var params   = new URLSearchParams(window.location.search);
+    var apiKey   = params.get('apiKey')   || null;
+    var apiUrl   = params.get('apiUrl')   || 'http://localhost:8080';
+    var modelKey = params.get('modelKey') || 'iphone_17';
 
     // Update header pill
     var pill = document.getElementById('mode-pill');
@@ -500,17 +532,58 @@
       pill.className   = 'header-pill pill-live';
     }
 
-    // Model pill interaction (demo only)
-    document.querySelectorAll('.model-pill').forEach(function (p) {
-      p.addEventListener('click', function () {
-        document.querySelectorAll('.model-pill').forEach(function (x) { x.classList.remove('active'); });
+    // Track active model
+    var currentModelKey = modelKey;
+
+    // If URL has a Samsung modelKey, switch to Samsung brand tab on load
+    if (modelKey.indexOf('samsung') !== -1) {
+      switchBrand('samsung');
+      // activate the right pill
+      document.querySelectorAll('.model-pill').forEach(function(p) {
+        p.classList.toggle('active', p.dataset.model === modelKey);
+      });
+    }
+
+    // Brand tab switching
+    document.querySelectorAll('.brand-tab').forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        switchBrand(tab.dataset.brand);
+      });
+    });
+
+    function switchBrand(brand) {
+      document.querySelectorAll('.brand-tab').forEach(function(t) {
+        t.classList.toggle('active', t.dataset.brand === brand);
+      });
+      document.getElementById('models-apple').style.display   = brand === 'apple'   ? '' : 'none';
+      document.getElementById('models-samsung').style.display = brand === 'samsung' ? '' : 'none';
+    }
+
+    // Model pill clicking — switches model
+    document.querySelectorAll('.model-pill').forEach(function(p) {
+      p.addEventListener('click', function() {
+        var mk = p.dataset.model;
+        if (!mk || mk === currentModelKey) return;
+
+        // Update active pill (within the visible group only)
+        document.querySelectorAll('.model-pill').forEach(function(x) { x.classList.remove('active'); });
         p.classList.add('active');
+
+        currentModelKey = mk;
+
+        // Re-init SDK with new model
+        if (apiKey) {
+          PreviewKit.init({ container: '#pk-widget', modelKey: mk, apiKey: apiKey, apiUrl: apiUrl });
+        } else {
+          // Demo mode: just log (can't switch without API)
+          console.log('[PreviewKit Demo] No apiKey — cannot switch to', mk, '(add ?apiKey=... to URL)');
+        }
       });
     });
 
     // Init SDK
     if (apiKey) {
-      PreviewKit.init({ container: '#pk-widget', templateId: templateId, apiKey: apiKey, apiUrl: apiUrl });
+      PreviewKit.init({ container: '#pk-widget', modelKey: modelKey, apiKey: apiKey, apiUrl: apiUrl });
     } else {
       PreviewKit.init({ container: '#pk-widget', template: TEMPLATE_DEMO });
     }
@@ -530,9 +603,9 @@
         '',
         '<script>',
         '  PreviewKit.init({',
-        '    container:  "#pk-widget",',
-        '    templateId: "phonecase_iphone17",',
-        '    apiKey:     "pk_live_your_key"',
+        '    container: "#pk-widget",',
+        '    modelKey:  "iphone_17",',
+        '    apiKey:    "pk_live_your_key"',
         '  });',
         '',
         '  PreviewKit.on("confirm", function(data) {',
