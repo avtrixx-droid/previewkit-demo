@@ -12,11 +12,40 @@
 (function (root) {
   'use strict';
 
-  var SDK_VERSION = '2.3.0';
+  var SDK_VERSION = '2.5.0';
   var DEFAULT_URL = 'http://localhost:8080';
   var SCALE_MIN = 1.0;
   var SCALE_MAX = 4.0;
   var SCALE_STEP = 0.25;
+
+  /* ─── Theme system ────────────────────────────────────────────────────────
+     Theme is one of 'light' | 'dark' | 'auto' (default 'auto').
+     Auto walks DOM ancestors of the container, computes Rec.709 luminance of
+     the first opaque background; <0.5 ⇒ dark, else light. Falls back to
+     prefers-color-scheme, finally to light.
+  ─────────────────────────────────────────────────────────────────────────── */
+  function _luma(rgb) {
+    return 0.2126 * (rgb[0]/255) + 0.7152 * (rgb[1]/255) + 0.0722 * (rgb[2]/255);
+  }
+  function _parseRGB(str) {
+    if (!str) return null;
+    var m = str.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)/);
+    if (!m) return null;
+    var alpha = m[4] === undefined ? 1 : parseFloat(m[4]);
+    if (alpha < 0.05) return null;
+    return [parseInt(m[1],10), parseInt(m[2],10), parseInt(m[3],10)];
+  }
+  function _resolveTheme(cfgTheme, container) {
+    if (cfgTheme === 'light' || cfgTheme === 'dark') return cfgTheme;
+    var node = container;
+    while (node && node !== document.documentElement) {
+      var rgb = _parseRGB(getComputedStyle(node).backgroundColor);
+      if (rgb) return _luma(rgb) < 0.5 ? 'dark' : 'light';
+      node = node.parentElement;
+    }
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    return 'light';
+  }
 
   // Universal phone-back fallback image (used when no vendorTemplate is provided)
   var FALLBACK_IMAGE_URL = 'https://res.cloudinary.com/dtjbyme7m/image/upload/v1777397169/Iphone17_bp99hm.webp';
@@ -26,16 +55,26 @@
    // x: 32%..68%, y: 8%..92% of the image. Full Back covers the whole case.
   // Phone bounds within the natural fallback image (Iphone17_bp99hm.webp, 900×900).
   // We crop the image to this rect so the phone fills the canvas tightly (no margin).
-  var FALLBACK_PHONE_BOUNDS_IMG = { xPctImg: 0.32, yPctImg: 0.08, wPctImg: 0.36, hPctImg: 0.84 };
+  // Vertical span tuned so top + bottom bezels render at the same thickness as the
+  // side bezels (was 0.05/0.90 → too thick top/bottom; tightened to 0.065/0.872).
+  var FALLBACK_PHONE_BOUNDS_IMG = { xPctImg: 0.295, yPctImg: 0.065, wPctImg: 0.41, hPctImg: 0.872 };
 
   // Photo zones expressed in IMAGE-relative fractions; converted at render time
   // to pixels within the cropped phone-bounds rect on the canvas.
+  // `radiusFrac` (optional, 0–1 fraction of canvas width) round-clips the photo
+  // so its corners follow the phone case curvature rather than being sharp.
   var FALLBACK_LAYOUT_ZONES = {
-    // Full Back = entire phone case rectangle. Transparent case-body in the image
-    // lets the photo show through; opaque camera island stays visible on top.
-    full_back:   { xPctImg: 0.32, yPctImg: 0.08, wPctImg: 0.36, hPctImg: 0.84 },
-    // Below Camera = photo only below the camera plateau.
-    skip_camera: { xPctImg: 0.32, yPctImg: 0.40, wPctImg: 0.36, hPctImg: 0.52 }
+    // Full Back = entire phone case rectangle (matches FALLBACK_PHONE_BOUNDS_IMG
+    // exactly so the photo fills edge-to-edge). The case PNG is drawn ON TOP after
+    // the photo, so opaque bezels + camera island stay visible above the photo.
+    // radiusFrac matches the case PNG's outer corner curvature (~8% of canvas width
+    // for the iPhone 17 case). With sharp corners, the photo extended past the case
+    // edge into transparent corner area, exposing the modal background and making
+    // the corners look "thick". This radius lets the photo terminate exactly at the
+    // case outer edge so the bezel appears uniformly thin all the way around.
+    full_back:   { xPctImg: 0.295, yPctImg: 0.065, wPctImg: 0.41, hPctImg: 0.872, radiusFrac: 0.08 },
+    // Below Camera = photo only below the camera plateau (vertically centered with symmetric ~0.04 margins).
+    skip_camera: { xPctImg: 0.32,  yPctImg: 0.40,  wPctImg: 0.36, hPctImg: 0.48 }
   };
 
   /* ─── CSS ─────────────────────────────────────────────────────────────────── */
@@ -270,6 +309,18 @@
     '.pk-err{padding:16px 20px;background:#fff0f0;border:1px solid #fecaca;',
     'border-radius:12px;color:#dc2626;font-size:13px;font-family:-apple-system,sans-serif;}',
 
+    /* ── Missing-preview (404) banner ── */
+    '.pk-missing{display:flex;align-items:center;gap:10px;',
+    'padding:12px 14px;background:#fbf6ec;border:1px solid #ecd9b8;',
+    'border-radius:12px;color:#234b46;font-size:13px;font-weight:500;',
+    'font-family:-apple-system,sans-serif;line-height:1.4;}',
+    '.pk-missing-msg{flex:1;}',
+    '.pk-missing-x{flex-shrink:0;width:22px;height:22px;border-radius:50%;border:none;',
+    'background:transparent;color:#c0532b;font-size:14px;line-height:1;cursor:pointer;',
+    'display:flex;align-items:center;justify-content:center;padding:0;',
+    'transition:background 0.15s,color 0.15s;}',
+    '.pk-missing-x:hover{background:rgba(192,83,43,0.12);color:#a0431f;}',
+
     /* ── Mobile: bottom sheet ── */
     '@media(max-width:640px){',
     '.pk-backdrop{padding:0;align-items:flex-end;}',
@@ -281,6 +332,178 @@
     '-webkit-overflow-scrolling:touch;}',
     '.pk-modal-title{font-size:18px;}',
     '}',
+
+    /* ════════════════════════════════════════════════════════════════════════
+       THEME: LIGHT — premium ink-on-white. Applied via .pk-theme-light on
+       the merchant container AND the body-level backdrop.
+    ════════════════════════════════════════════════════════════════════════ */
+    '.pk-theme-light .pk-open-btn,.pk.pk-theme-light .pk-open-btn{',
+    'background:#0f172a;color:#fff;',
+    'box-shadow:0 4px 14px rgba(15,23,42,0.22),0 1px 3px rgba(15,23,42,0.10);}',
+    '.pk-theme-light .pk-open-btn::before,.pk.pk-theme-light .pk-open-btn::before{',
+    'background:linear-gradient(135deg,rgba(255,255,255,0.08) 0%,transparent 60%);}',
+    '.pk-theme-light .pk-open-btn:hover,.pk.pk-theme-light .pk-open-btn:hover{',
+    'background:#1e293b;box-shadow:0 8px 22px rgba(15,23,42,0.30);}',
+    '.pk-theme-light .pk-open-btn.pk-btn-done,.pk.pk-theme-light .pk-open-btn.pk-btn-done{',
+    'background:linear-gradient(135deg,#10b981,#059669);',
+    'box-shadow:0 4px 16px rgba(16,185,129,0.32);}',
+
+    '.pk-backdrop.pk-theme-light{background:rgba(15,23,42,0.45);}',
+    '.pk-theme-light .pk-modal{background:#ffffff;',
+    'box-shadow:0 40px 120px rgba(15,23,42,0.22),0 4px 28px rgba(15,23,42,0.10);}',
+    '.pk-theme-light .pk-preview-col{',
+    'background:linear-gradient(160deg,#f8fafc 0%,#eef2f7 100%);}',
+    '.pk-theme-light .pk-preview-col::before{',
+    'background:radial-gradient(ellipse,rgba(15,23,42,0.04) 0%,transparent 68%);}',
+    '.pk-theme-light .pk-preview-col::after{',
+    'background:radial-gradient(circle,rgba(15,23,42,0.03) 0%,transparent 70%);}',
+    '.pk-theme-light .pk-shell{background:#ffffff;',
+    'box-shadow:0 0 0 1px rgba(15,23,42,0.06),',
+    '0 16px 40px rgba(15,23,42,0.10),0 4px 14px rgba(15,23,42,0.06);}',
+
+    '.pk-theme-light .pk-hint-pill{background:rgba(15,23,42,0.78);',
+    'border-color:rgba(255,255,255,0.10);color:rgba(255,255,255,0.95);}',
+
+    '.pk-theme-light .pk-zoom{background:rgba(15,23,42,0.04);',
+    'border-color:rgba(15,23,42,0.08);}',
+    '.pk-theme-light .pk-zb{background:rgba(15,23,42,0.06);color:rgba(15,23,42,0.78);}',
+    '.pk-theme-light .pk-zb:hover{background:rgba(15,23,42,0.12);}',
+    '.pk-theme-light .pk-z-track{background:rgba(15,23,42,0.10);}',
+    '.pk-theme-light .pk-z-fill{background:#0f172a;}',
+    '.pk-theme-light .pk-z-lbl{color:rgba(15,23,42,0.50);}',
+    '.pk-theme-light .pk-z-sep{background:rgba(15,23,42,0.10);}',
+    '.pk-theme-light .pk-z-reset{color:rgba(15,23,42,0.45);}',
+    '.pk-theme-light .pk-z-reset:hover{color:#0f172a;}',
+
+    '.pk-theme-light .pk-modal-title{color:#0f172a;}',
+    '.pk-theme-light .pk-modal-sub{color:#64748b;}',
+    '.pk-theme-light .pk-close{background:rgba(15,23,42,0.05);color:rgba(15,23,42,0.45);}',
+    '.pk-theme-light .pk-close:hover{background:rgba(15,23,42,0.10);color:rgba(15,23,42,0.85);}',
+    '.pk-theme-light .pk-divider{background:#e2e8f0;}',
+
+    '.pk-theme-light .pk-upload{border-color:#cbd5e1;background:#f8fafc;}',
+    '.pk-theme-light .pk-upload:hover,.pk-theme-light .pk-upload.pk-drag-over{',
+    'border-color:#0f172a;background:#f1f5f9;}',
+    '.pk-theme-light .pk-upload.pk-filled{border-color:#10b981;background:#f0fdf4;}',
+    '.pk-theme-light .pk-upload-icon{color:#94a3b8;}',
+    '.pk-theme-light .pk-upload:hover .pk-upload-icon,',
+    '.pk-theme-light .pk-upload.pk-drag-over .pk-upload-icon{color:#0f172a;}',
+    '.pk-theme-light .pk-upload-h{color:#0f172a;}',
+    '.pk-theme-light .pk-upload-s{color:#94a3b8;}',
+    '.pk-theme-light .pk-file-name{color:#0f172a;}',
+    '.pk-theme-light .pk-file-meta{color:#64748b;}',
+    '.pk-theme-light .pk-file-chg{color:#0f172a;}',
+    '.pk-theme-light .pk-section-label{color:#64748b;}',
+
+    '.pk-theme-light .pk-lpill{border-color:#e2e8f0;background:#f8fafc;}',
+    '.pk-theme-light .pk-lpill:hover{border-color:#0f172a;background:#f1f5f9;}',
+    '.pk-theme-light .pk-lpill.pk-on{border-color:#0f172a;background:#eef2ff;}',
+    '.pk-theme-light .pk-lpill-lbl{color:#475569;}',
+    '.pk-theme-light .pk-lpill.pk-on .pk-lpill-lbl{color:#0f172a;}',
+
+    '.pk-theme-light .pk-cta{background:#0f172a;color:#ffffff;',
+    'box-shadow:0 4px 14px rgba(15,23,42,0.22),0 1px 3px rgba(15,23,42,0.10);}',
+    '.pk-theme-light .pk-cta:hover:not(:disabled){background:#1e293b;',
+    'box-shadow:0 8px 22px rgba(15,23,42,0.30);}',
+    '.pk-theme-light .pk-cta.pk-done{background:linear-gradient(135deg,#10b981,#059669);',
+    'box-shadow:0 4px 16px rgba(16,185,129,0.32);}',
+
+    '.pk-theme-light .pk-sub{color:#94a3b8;}',
+    '.pk-theme-light .pk-loading{color:#64748b;}',
+    '.pk-theme-light .pk-loading-ring{border-color:#e2e8f0;border-top-color:#0f172a;}',
+    '.pk-theme-light .pk-err{background:#fef2f2;border-color:#fecaca;color:#b91c1c;}',
+    '.pk-theme-light .pk-missing,.pk.pk-theme-light .pk-missing{',
+    'background:#f8fafc;border-color:#e2e8f0;color:#0f172a;}',
+    '.pk-theme-light .pk-missing-x,.pk.pk-theme-light .pk-missing-x{color:#64748b;}',
+    '.pk-theme-light .pk-missing-x:hover,.pk.pk-theme-light .pk-missing-x:hover{',
+    'background:rgba(15,23,42,0.08);color:#0f172a;}',
+    '.pk-theme-light .pk-warn{background:#fffbeb;border-color:#fcd34d;color:#78350f;}',
+
+    /* ════════════════════════════════════════════════════════════════════════
+       THEME: DARK — premium pearl-on-slate.
+    ════════════════════════════════════════════════════════════════════════ */
+    '.pk-theme-dark .pk-open-btn,.pk.pk-theme-dark .pk-open-btn{',
+    'background:#fafaf9;color:#0f172a;',
+    'box-shadow:0 4px 14px rgba(0,0,0,0.30),0 1px 3px rgba(0,0,0,0.20);}',
+    '.pk-theme-dark .pk-open-btn::before,.pk.pk-theme-dark .pk-open-btn::before{',
+    'background:linear-gradient(135deg,rgba(15,23,42,0.04) 0%,transparent 60%);}',
+    '.pk-theme-dark .pk-open-btn:hover,.pk.pk-theme-dark .pk-open-btn:hover{',
+    'background:#e7e5e4;box-shadow:0 8px 22px rgba(0,0,0,0.40);}',
+    '.pk-theme-dark .pk-open-btn.pk-btn-done,.pk.pk-theme-dark .pk-open-btn.pk-btn-done{',
+    'background:linear-gradient(135deg,#34d399,#10b981);color:#0f172a;',
+    'box-shadow:0 4px 16px rgba(52,211,153,0.30);}',
+
+    '.pk-backdrop.pk-theme-dark{background:rgba(2,6,23,0.78);}',
+    '.pk-theme-dark .pk-modal{background:#0f172a;',
+    'box-shadow:0 40px 120px rgba(0,0,0,0.55),0 4px 28px rgba(0,0,0,0.35);}',
+    '.pk-theme-dark .pk-preview-col{',
+    'background:linear-gradient(160deg,#1e293b 0%,#172033 100%);}',
+    '.pk-theme-dark .pk-preview-col::before{',
+    'background:radial-gradient(ellipse,rgba(167,139,250,0.10) 0%,transparent 68%);}',
+    '.pk-theme-dark .pk-preview-col::after{',
+    'background:radial-gradient(circle,rgba(167,139,250,0.06) 0%,transparent 70%);}',
+    '.pk-theme-dark .pk-shell{background:#0f172a;',
+    'box-shadow:0 0 0 1px rgba(255,255,255,0.06),',
+    '0 16px 40px rgba(0,0,0,0.50),0 4px 14px rgba(0,0,0,0.30);}',
+
+    '.pk-theme-dark .pk-hint-pill{background:rgba(2,6,23,0.78);',
+    'border-color:rgba(255,255,255,0.12);color:rgba(255,255,255,0.95);}',
+
+    '.pk-theme-dark .pk-zoom{background:rgba(255,255,255,0.06);',
+    'border-color:rgba(255,255,255,0.10);}',
+    '.pk-theme-dark .pk-zb{background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.85);}',
+    '.pk-theme-dark .pk-zb:hover{background:rgba(255,255,255,0.18);}',
+    '.pk-theme-dark .pk-z-track{background:rgba(255,255,255,0.14);}',
+    '.pk-theme-dark .pk-z-fill{background:#fafaf9;}',
+    '.pk-theme-dark .pk-z-lbl{color:rgba(255,255,255,0.55);}',
+    '.pk-theme-dark .pk-z-sep{background:rgba(255,255,255,0.12);}',
+    '.pk-theme-dark .pk-z-reset{color:rgba(255,255,255,0.45);}',
+    '.pk-theme-dark .pk-z-reset:hover{color:#fafaf9;}',
+
+    '.pk-theme-dark .pk-modal-title{color:#f8fafc;}',
+    '.pk-theme-dark .pk-modal-sub{color:#94a3b8;}',
+    '.pk-theme-dark .pk-close{background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.55);}',
+    '.pk-theme-dark .pk-close:hover{background:rgba(255,255,255,0.14);color:rgba(255,255,255,0.95);}',
+    '.pk-theme-dark .pk-divider{background:rgba(255,255,255,0.06);}',
+
+    '.pk-theme-dark .pk-upload{border-color:rgba(255,255,255,0.12);background:rgba(255,255,255,0.03);}',
+    '.pk-theme-dark .pk-upload:hover,.pk-theme-dark .pk-upload.pk-drag-over{',
+    'border-color:#a78bfa;background:rgba(167,139,250,0.06);}',
+    '.pk-theme-dark .pk-upload.pk-filled{border-color:#34d399;background:rgba(52,211,153,0.07);}',
+    '.pk-theme-dark .pk-upload-icon{color:rgba(255,255,255,0.40);}',
+    '.pk-theme-dark .pk-upload:hover .pk-upload-icon,',
+    '.pk-theme-dark .pk-upload.pk-drag-over .pk-upload-icon{color:#c4b5fd;}',
+    '.pk-theme-dark .pk-upload-h{color:#f8fafc;}',
+    '.pk-theme-dark .pk-upload-s{color:rgba(255,255,255,0.55);}',
+    '.pk-theme-dark .pk-file-name{color:#f8fafc;}',
+    '.pk-theme-dark .pk-file-meta{color:rgba(255,255,255,0.55);}',
+    '.pk-theme-dark .pk-file-chg{color:#c4b5fd;}',
+    '.pk-theme-dark .pk-section-label{color:rgba(255,255,255,0.55);}',
+
+    '.pk-theme-dark .pk-lpill{border-color:rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);}',
+    '.pk-theme-dark .pk-lpill:hover{border-color:#a78bfa;background:rgba(167,139,250,0.08);}',
+    '.pk-theme-dark .pk-lpill.pk-on{border-color:#a78bfa;background:rgba(167,139,250,0.14);}',
+    '.pk-theme-dark .pk-lpill-lbl{color:rgba(255,255,255,0.75);}',
+    '.pk-theme-dark .pk-lpill.pk-on .pk-lpill-lbl{color:#c4b5fd;}',
+
+    '.pk-theme-dark .pk-cta{background:#fafaf9;color:#0f172a;',
+    'box-shadow:0 4px 14px rgba(0,0,0,0.30),0 1px 3px rgba(0,0,0,0.20);}',
+    '.pk-theme-dark .pk-cta:hover:not(:disabled){background:#e7e5e4;',
+    'box-shadow:0 8px 22px rgba(0,0,0,0.40);}',
+    '.pk-theme-dark .pk-cta.pk-done{background:linear-gradient(135deg,#34d399,#10b981);color:#0f172a;',
+    'box-shadow:0 4px 16px rgba(52,211,153,0.30);}',
+    '.pk-theme-dark .pk-cta .pk-spin{border-color:rgba(15,23,42,0.30);border-top-color:#0f172a;}',
+
+    '.pk-theme-dark .pk-sub{color:rgba(255,255,255,0.55);}',
+    '.pk-theme-dark .pk-loading{color:rgba(255,255,255,0.55);}',
+    '.pk-theme-dark .pk-loading-ring{border-color:rgba(255,255,255,0.10);border-top-color:#fafaf9;}',
+    '.pk-theme-dark .pk-err{background:rgba(239,68,68,0.10);border-color:rgba(239,68,68,0.30);color:#fca5a5;}',
+    '.pk-theme-dark .pk-missing,.pk.pk-theme-dark .pk-missing{',
+    'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.08);color:rgba(255,255,255,0.75);}',
+    '.pk-theme-dark .pk-missing-x,.pk.pk-theme-dark .pk-missing-x{color:rgba(255,255,255,0.55);}',
+    '.pk-theme-dark .pk-missing-x:hover,.pk.pk-theme-dark .pk-missing-x:hover{',
+    'background:rgba(255,255,255,0.08);color:#fafaf9;}',
+    '.pk-theme-dark .pk-warn{background:rgba(252,211,77,0.10);border-color:rgba(252,211,77,0.30);color:#fcd34d;}',
   ].join('');
 
   function _injectStyles() {
@@ -326,7 +549,12 @@
     // When true, render programmatic case/camera/buttons even without a vendorTemplate.
     // Default false → fall back to the universal phone image when no vendorTemplate exists.
     this.useProgrammaticCase = !!cfg.useProgrammaticCase;
-    this.fallbackImageUrl = cfg.fallbackImageUrl || FALLBACK_IMAGE_URL;
+    this.fallbackImageUrl = cfg.fallbackImageUrl || cfg.fallbackUrl || FALLBACK_IMAGE_URL;
+    // Theme: 'light' | 'dark' | 'auto' (default 'auto'). Resolved at init() once
+    // we have the container so auto-detect can read its ancestors.
+    this.themePref = (cfg.theme === 'light' || cfg.theme === 'dark' || cfg.theme === 'auto')
+        ? cfg.theme : 'auto';
+    this.theme = null; // resolved 'light' or 'dark'
     this.template = null;
     this.canvas = null;
     this.ctx = null;
@@ -365,11 +593,20 @@
       this.container = el;
       el.classList.add('pk');
 
+      // Resolve theme & apply class to container so trigger button + 404 banner are themed
+      this.theme = _resolveTheme(this.themePref, el);
+      el.classList.remove('pk-theme-light', 'pk-theme-dark');
+      el.classList.add('pk-theme-' + this.theme);
+
       if (this.apiKey && this.modelKey) {
         this._loading();
         fetch(this.apiUrl + '/v1/models/' + this.modelKey,
           { headers: { 'X-PreviewKit-Key': this.apiKey } })
           .then(function (r) {
+            if (r.status === 404) {
+              self._renderMissingPreviewBanner();
+              return Promise.reject({ __pkHandled: true });
+            }
             if (!r.ok) return r.json().then(function (e) { return Promise.reject(e); });
             return r.json();
           })
@@ -388,6 +625,7 @@
             self._mount();
           })
           .catch(function (e) {
+            if (e && e.__pkHandled) return;
             var msg = (e && e.error && e.error.message) || 'Could not load model.';
             el.innerHTML = '<div class="pk-err">&#9888; ' + _esc(msg) + '</div>';
           });
@@ -836,6 +1074,18 @@
         '<div class="pk-loading"><div class="pk-loading-ring"></div>Loading&#8230;</div>';
     },
 
+    /* ── 404 missing-preview banner (dismissible) ── */
+    _renderMissingPreviewBanner: function () {
+      var el = this.container;
+      el.innerHTML =
+        '<div class="pk-missing">' +
+          '<span class="pk-missing-msg">This product doesn’t have a custom preview yet.</span>' +
+          '<button class="pk-missing-x" type="button" aria-label="Dismiss">✕</button>' +
+        '</div>';
+      var x = el.querySelector('.pk-missing-x');
+      if (x) x.addEventListener('click', function () { el.innerHTML = ''; });
+    },
+
     /* ── Mount ── */
     _mount: function () {
       this._renderTrigger();
@@ -878,9 +1128,9 @@
       var self = this;
       var t = this.template;
 
-      /* Backdrop */
+      /* Backdrop — apply resolved theme so all modal chrome themes correctly */
       var backdrop = document.createElement('div');
-      backdrop.className = 'pk pk-backdrop';
+      backdrop.className = 'pk pk-backdrop pk-theme-' + (this.theme || 'light');
 
       /* Modal panel */
       var modal = document.createElement('div');
@@ -948,6 +1198,8 @@
     _modalHTML: function () {
       var t = this.template;
       var isOverlay = t.type === 'overlay';
+      var hasVendorZone = t.photoZones && t.photoZones.length >= 1;
+      var hideLayouts = hasVendorZone || isOverlay;
       var isLive = !!this.apiKey;
 
       return (
@@ -1001,7 +1253,7 @@
         '</div>' +
 
         /* Layout selector */
-        (!isOverlay
+        (!hideLayouts
           ? '<div>' +
           '<div class="pk-section-label">Print layout</div>' +
           '<div class="pk-layouts">' +
@@ -1165,12 +1417,14 @@
         var fy = (pz.yPctImg - pb.yPctImg) / pb.hPctImg;
         var fw = pz.wPctImg / pb.wPctImg;
         var fh = pz.hPctImg / pb.hPctImg;
-        return {
+        var zone = {
           x: Math.round(fx * t.canvas.width),
           y: Math.round(fy * t.canvas.height),
           w: Math.round(fw * t.canvas.width),
           h: Math.round(fh * t.canvas.height)
         };
+        if (pz.radiusFrac) zone.radius = Math.round(pz.radiusFrac * t.canvas.width);
+        return zone;
       }
       var pa = this._area();
       return pa ? { x: pa.x, y: pa.y, w: pa.width, h: pa.height }
@@ -1504,7 +1758,9 @@
 
     _renderOverlay: function (ctx, t) {
       var cw = t.canvas.width, ch = t.canvas.height;
-      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
+      // Transparent canvas — themed .pk-shell background shows through
+      // (white in light theme, slate-900 in dark) so the modal feels consistent.
+      ctx.clearRect(0, 0, cw, ch);
       var z = this._zone();
       if (this.userImage) { this._drawImg(ctx, z); }
       else { this._placeholder(ctx, z, true); }
@@ -1521,7 +1777,8 @@
     },
 
     _renderProgrammatic: function (ctx, t) {
-      ctx.fillStyle = '#f0f0f5'; ctx.fillRect(0, 0, t.canvas.width, t.canvas.height);
+      // Transparent canvas — themed .pk-shell background shows through.
+      ctx.clearRect(0, 0, t.canvas.width, t.canvas.height);
       this._drawCase(ctx, t);
       var z = this._zone();
       if (this.userImage) { this._drawImg(ctx, z); }
@@ -1537,7 +1794,15 @@
       var rs = bs * this.imageScale;
       var dw = img.width * rs, dh = img.height * rs;
       ctx.save();
-      ctx.beginPath(); ctx.rect(z.x, z.y, z.w, z.h); ctx.clip();
+      ctx.beginPath();
+      // Round-clip when the zone provides a corner radius (e.g. fallback_image
+      // full_back) so photo corners follow the phone case curvature.
+      if (z.radius && z.radius > 0) {
+        ctx.roundRect(z.x, z.y, z.w, z.h, z.radius);
+      } else {
+        ctx.rect(z.x, z.y, z.w, z.h);
+      }
+      ctx.clip();
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img,
         z.x + z.w / 2 - dw / 2 + this.imageOffsetX,
@@ -1546,18 +1811,22 @@
     },
 
     _placeholder: function (ctx, z, forOverlay) {
+      // Placeholder always sits on top of a light case body (programmatic case
+      // is white-filled; fallback_image PNG is white case body; vendor overlays
+      // typically use light photo zones). Use slate tints — visible in BOTH
+      // light and dark modal themes since the underlying surface is light.
       ctx.save();
-      ctx.fillStyle = forOverlay ? 'rgba(99,102,241,0.05)' : 'rgba(0,0,0,0.025)';
+      ctx.fillStyle = 'rgba(15,23,42,0.025)';
       ctx.fillRect(z.x, z.y, z.w, z.h);
       ctx.setLineDash([9, 7]);
-      ctx.strokeStyle = forOverlay ? 'rgba(99,102,241,0.35)' : 'rgba(0,0,0,0.11)';
+      ctx.strokeStyle = 'rgba(15,23,42,0.18)';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(z.x + 1, z.y + 1, z.w - 2, z.h - 2);
       ctx.setLineDash([]);
       var cx = z.x + z.w / 2, cy = z.y + z.h / 2;
-      ctx.fillStyle = forOverlay ? 'rgba(99,102,241,0.22)' : 'rgba(0,0,0,0.09)';
+      ctx.fillStyle = 'rgba(15,23,42,0.14)';
       ctx.fillRect(cx - 14, cy - 2, 28, 4); ctx.fillRect(cx - 2, cy - 14, 4, 28);
-      ctx.fillStyle = forOverlay ? 'rgba(99,102,241,0.5)' : 'rgba(0,0,0,0.28)';
+      ctx.fillStyle = 'rgba(15,23,42,0.45)';
       ctx.font = '400 11px -apple-system,system-ui,sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('Upload your photo', cx, cy + 26);
@@ -1577,9 +1846,27 @@
       g.addColorStop(0.4, 'rgba(255,255,255,0)');
       g.addColorStop(1, 'rgba(0,0,0,0.04)');
       ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fillStyle = g; ctx.fill();
+      // Outer case border
       ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
       ctx.strokeStyle = p.borderColor || 'rgba(0,0,0,0.08)';
       ctx.lineWidth = 1; ctx.stroke();
+
+      // ── Visible bezel: darker rounded ring inside the case outline ──
+      var bezelInset = 3.5;
+      var bezelW = 3;
+      var bx = x + bezelInset, by = y + bezelInset;
+      var bw = w - bezelInset * 2, bh = h - bezelInset * 2;
+      var br = Math.max(0, r - bezelInset);
+      ctx.save();
+      var bg = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+      bg.addColorStop(0, 'rgba(40,40,48,0.85)');
+      bg.addColorStop(0.5, 'rgba(70,70,80,0.65)');
+      bg.addColorStop(1, 'rgba(20,20,26,0.9)');
+      ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, br);
+      ctx.strokeStyle = bg;
+      ctx.lineWidth = bezelW;
+      ctx.stroke();
+      ctx.restore();
     },
 
     _drawCamera: function (ctx, cam) {
@@ -1649,9 +1936,24 @@
 
     _drawButtons: function (ctx, pc, btns) {
       btns.forEach(function (b) {
-        var x = b.side === 'left' ? pc.x - b.thickness : pc.x + pc.width;
-        ctx.beginPath(); ctx.roundRect(x, pc.y + b.offset, b.thickness, b.length, b.radius || 2);
-        ctx.fillStyle = '#c0c0c8'; ctx.fill();
+        var thickness = Math.max(b.thickness || 5, 5);
+        var x = b.side === 'left' ? pc.x - thickness + 1 : pc.x + pc.width - 1;
+        var y = pc.y + b.offset;
+        var rad = b.radius || Math.min(thickness, b.length) / 2;
+        ctx.save();
+        ctx.shadowColor = 'rgba(0,0,0,0.35)';
+        ctx.shadowBlur = 3;
+        ctx.shadowOffsetX = b.side === 'left' ? -1 : 1;
+        ctx.beginPath(); ctx.roundRect(x, y, thickness, b.length, rad);
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fill();
+        ctx.restore();
+        // Subtle highlight along the outer edge for metallic feel
+        ctx.beginPath();
+        ctx.roundRect(x, y, thickness, b.length, rad);
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
       });
     },
 
