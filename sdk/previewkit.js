@@ -12,7 +12,7 @@
 (function (root) {
   'use strict';
 
-  var SDK_VERSION = '2.5.0';
+  var SDK_VERSION = '2.7.0';
   var DEFAULT_URL = 'http://localhost:8080';
   var SCALE_MIN = 1.0;
   var SCALE_MAX = 4.0;
@@ -46,6 +46,80 @@
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
     return 'light';
   }
+
+  /* ─── Shopify cart auto-attach ────────────────────────────────────────────
+     Once a design is confirmed, store the designId and then patch any cart line
+     items that lack the property — covering every theme's Add-to-Cart variation
+     (form submit, fetch, XHR, JSON, FormData) by fixing the cart AFTER the fact
+     via Shopify's standard /cart/change.js endpoint.
+  ─────────────────────────────────────────────────────────────────────────── */
+  var _shopifyAttachInstalled = false;
+  var _shopifyDesignId = null;
+  var _shopifyPropName = '_pk_design_id';
+
+  function _isShopify() {
+    return typeof window !== 'undefined' && !!window.Shopify;
+  }
+
+  function _shopifyEnsureCartProp() {
+    if (!_shopifyDesignId) return;
+    var origFetch = _shopifyOrigFetch || window.fetch;
+    origFetch('/cart.js').then(function (r) { return r.json(); }).then(function (cart) {
+      if (!cart || !Array.isArray(cart.items)) return;
+      for (var i = 0; i < cart.items.length; i++) {
+        var it = cart.items[i];
+        if (!it.properties || !it.properties[_shopifyPropName]) {
+          var newProps = {};
+          if (it.properties) for (var k in it.properties) newProps[k] = it.properties[k];
+          newProps[_shopifyPropName] = _shopifyDesignId;
+          origFetch('/cart/change.js', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ line: i + 1, properties: newProps })
+          }).then(function () {
+            try { sessionStorage.removeItem('pk_design_id'); } catch (e) {}
+          }).catch(function () { /* swallow — patch will retry on next add */ });
+          return; // patch one line per pass
+        }
+      }
+    }).catch(function () { /* not on a Shopify page or cart unreachable */ });
+  }
+
+  var _shopifyOrigFetch = null;
+  function _shopifyInstallAttach(propName) {
+    if (_shopifyAttachInstalled) return;
+    _shopifyAttachInstalled = true;
+    _shopifyPropName = propName || '_pk_design_id';
+    _shopifyOrigFetch = window.fetch;
+    window.fetch = function () {
+      var args = arguments;
+      var url = (typeof args[0] === 'string') ? args[0] : (args[0] && args[0].url) || '';
+      var p = _shopifyOrigFetch.apply(this, args);
+      if (_shopifyDesignId && url && (url.indexOf('/cart/add') !== -1 || url.indexOf('/cart/update') !== -1)) {
+        p.then(function () { setTimeout(_shopifyEnsureCartProp, 80); });
+      }
+      return p;
+    };
+    // Catch-up patch on first idle tick (in case line was added before SDK loaded)
+    if (typeof window.requestIdleCallback === 'function') {
+      requestIdleCallback(function () { _shopifyEnsureCartProp(); }, { timeout: 600 });
+    } else {
+      setTimeout(_shopifyEnsureCartProp, 400);
+    }
+  }
+
+  function _shopifyRecordDesign(designId) {
+    if (!designId) return;
+    _shopifyDesignId = designId;
+    try { sessionStorage.setItem('pk_design_id', designId); } catch (e) {}
+    setTimeout(_shopifyEnsureCartProp, 80);
+  }
+
+  // Restore designId from previous session (e.g. user reloaded between confirm + add-to-cart)
+  try {
+    var _savedPK = sessionStorage.getItem('pk_design_id');
+    if (_savedPK) _shopifyDesignId = _savedPK;
+  } catch (e) {}
 
   // Universal phone-back fallback image (used when no vendorTemplate is provided)
   var FALLBACK_IMAGE_URL = 'https://res.cloudinary.com/dtjbyme7m/image/upload/v1777397169/Iphone17_bp99hm.webp';
@@ -277,6 +351,12 @@
     '.pk-lpill-lbl{font-size:10px;font-weight:600;color:#3a3a4a;letter-spacing:0.1px;}',
     '.pk-lpill.pk-on .pk-lpill-lbl{color:#4f46e5;}',
 
+    /* Vendor template badge — replaces layout pills when a vendor zone is set */
+    '.pk-vendor-badge{display:inline-flex;align-items:center;gap:6px;',
+    'font-size:11px;font-weight:600;letter-spacing:0.3px;',
+    'padding:6px 10px;border-radius:100px;',
+    'background:rgba(15,23,42,0.06);color:rgba(15,23,42,0.65);}',
+
     /* CTA */
     '.pk-cta{width:100%;padding:15px 20px;border:none;border-radius:14px;',
     'background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);',
@@ -485,6 +565,7 @@
     '.pk-theme-dark .pk-lpill.pk-on{border-color:#a78bfa;background:rgba(167,139,250,0.14);}',
     '.pk-theme-dark .pk-lpill-lbl{color:rgba(255,255,255,0.75);}',
     '.pk-theme-dark .pk-lpill.pk-on .pk-lpill-lbl{color:#c4b5fd;}',
+    '.pk-theme-dark .pk-vendor-badge{background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.65);}',
 
     '.pk-theme-dark .pk-cta{background:#fafaf9;color:#0f172a;',
     'box-shadow:0 4px 14px rgba(0,0,0,0.30),0 1px 3px rgba(0,0,0,0.20);}',
@@ -550,6 +631,13 @@
     // Default false → fall back to the universal phone image when no vendorTemplate exists.
     this.useProgrammaticCase = !!cfg.useProgrammaticCase;
     this.fallbackImageUrl = cfg.fallbackImageUrl || cfg.fallbackUrl || FALLBACK_IMAGE_URL;
+    // Shopify cart auto-attach: when running on a Shopify storefront, the SDK will
+    // automatically patch the cart line item with `properties[_pk_design_id]` after
+    // the user clicks Confirm Design + adds to cart. Set to `false` to disable.
+    // Default: 'auto' — enables iff window.Shopify is present.
+    this.shopifyCartAttach = (cfg.shopifyCartAttach === false) ? false
+        : (cfg.shopifyCartAttach === true ? true : 'auto');
+    this.cartPropertyName = cfg.cartPropertyName || '_pk_design_id';
     // Theme: 'light' | 'dark' | 'auto' (default 'auto'). Resolved at init() once
     // we have the container so auto-detect can read its ancestors.
     this.themePref = (cfg.theme === 'light' || cfg.theme === 'dark' || cfg.theme === 'auto')
@@ -598,6 +686,11 @@
       el.classList.remove('pk-theme-light', 'pk-theme-dark');
       el.classList.add('pk-theme-' + this.theme);
 
+      // Auto-attach to Shopify cart if running on a Shopify storefront. Merchant
+      // doesn't need to write any cart-handling JS — SDK does it internally.
+      var attachOn = (this.shopifyCartAttach === 'auto') ? _isShopify() : !!this.shopifyCartAttach;
+      if (attachOn) _shopifyInstallAttach(this.cartPropertyName);
+
       if (this.apiKey && this.modelKey) {
         this._loading();
         fetch(this.apiUrl + '/v1/models/' + this.modelKey,
@@ -620,8 +713,10 @@
             self.template = self._norm(null, {
               deviceSpecs: m.deviceSpecs,
               templateKey: m.modelKey,
-              vendorTemplate: vt
+              vendorTemplate: vt,
+              model: m
             });
+            self._resolveDefaultLayout();
             self._mount();
           })
           .catch(function (e) {
@@ -631,6 +726,7 @@
           });
       } else if (cfg.template) {
         this.template = this._norm(cfg.template);
+        this._resolveDefaultLayout();
         this._mount();
       } else {
         throw new Error('PreviewKit: provide apiKey+modelKey or template.');
@@ -679,6 +775,12 @@
         var computed = this._computeFromSpecs(ds);
         computed.templateKey = api.templateKey || (t && (t.templateKey || t.templateId)) || 'dynamic';
 
+        // Capture per-model fields from the API response so the SDK can render
+        // server-supplied layouts and (future) per-model images.
+        computed.modelLayouts = (api.model && Array.isArray(api.model.layouts)) ? api.model.layouts : null;
+        computed.modelImageUrl = (api.model && api.model.imageUrl) || null;
+        computed.modelImagePhoneBounds = (api.model && api.model.imagePhoneBoundsPct) || null;
+
         // Override canvas size with API-provided dimensions if available.
         // (Skipped for fallback_image mode below — that path sets its own canvas size
         // matching the phone-bounds aspect to eliminate letterbox margin.)
@@ -709,12 +811,12 @@
           // No vendor zone: render universal phone-back fallback image
           // and let the Print Layout buttons pick the photo zone over it.
           computed.type = 'fallback_image';
-          computed.overlayUrl = this.fallbackImageUrl;
+          computed.overlayUrl = computed.modelImageUrl || this.fallbackImageUrl;
           computed.photoZones = null;
           computed.photoZone = null; // resolved per-render via selectedLayout
           // Resize canvas to match the phone-bounds aspect ratio so the cropped
           // image fills the canvas tightly (no letterbox margin).
-          var pb = FALLBACK_PHONE_BOUNDS_IMG;
+          var pb = computed.modelImagePhoneBounds || FALLBACK_PHONE_BOUNDS_IMG;
           var phoneAspect = pb.wPctImg / pb.hPctImg; // width / height
           var targetW = 360;
           computed.canvas.width = targetW;
@@ -749,6 +851,19 @@
       fb.overlayUrl = null;
       fb.photoZones = null;
       return fb;
+    },
+
+    /* If the server supplied layouts on this model, pick the default (or first)
+       and seed selectedLayout. No-op when modelLayouts is null/empty (older API). */
+    _resolveDefaultLayout: function () {
+      var t = this.template;
+      if (!t || !t.modelLayouts || !t.modelLayouts.length) return;
+      var def = null;
+      for (var i = 0; i < t.modelLayouts.length; i++) {
+        if (t.modelLayouts[i].isDefault) { def = t.modelLayouts[i]; break; }
+      }
+      if (!def) def = t.modelLayouts[0];
+      if (def && def.key) this.selectedLayout = def.key;
     },
 
     /* ─────────────────────────────────────────────────────────────────────────
@@ -1197,10 +1312,26 @@
 
     _modalHTML: function () {
       var t = this.template;
+      var self = this;
       var isOverlay = t.type === 'overlay';
       var hasVendorZone = t.photoZones && t.photoZones.length >= 1;
       var hideLayouts = hasVendorZone || isOverlay;
       var isLive = !!this.apiKey;
+
+      // Build layout pills HTML — prefer server-supplied layouts, fall back to
+      // hardcoded full_back + skip_camera for older API responses.
+      var layoutsHtml = '';
+      var layouts = t.modelLayouts;
+      if (layouts && layouts.length) {
+        layouts.sort(function (a, b) { return (a.sortOrder || 0) - (b.sortOrder || 0); });
+        layoutsHtml = layouts.map(function (lay) {
+          return _lpill(lay.key, lay.displayName, _layoutIconFor(lay.key), lay.key === self.selectedLayout);
+        }).join('');
+      } else {
+        layoutsHtml =
+          _lpill('full_back', 'Full Back', _svgLayoutFull(), self.selectedLayout === 'full_back') +
+          _lpill('skip_camera', 'Below Camera', _svgLayoutSkip(), self.selectedLayout === 'skip_camera');
+      }
 
       return (
         /* ── Preview column ── */
@@ -1257,11 +1388,13 @@
           ? '<div>' +
           '<div class="pk-section-label">Print layout</div>' +
           '<div class="pk-layouts">' +
-          _lpill('full_back', 'Full Back', _svgLayoutFull(), true) +
-          _lpill('skip_camera', 'Below Camera', _svgLayoutSkip(), false) +
+          layoutsHtml +
           '</div>' +
           '</div>'
-          : '') +
+          : '<div class="pk-vendor-badge">' +
+            _svg('check', 12, 12, 'currentColor') +
+            '<span>Pre-set design layout</span>' +
+            '</div>') +
 
         /* CTA */
         '<button class="pk-cta" disabled>' + this._ctaHTML() + '</button>' +
@@ -1411,6 +1544,27 @@
       // image-fraction zone as a phone-bounds fraction, then map to canvas pixels.
       if (t.type === 'fallback_image') {
         var ly = this.selectedLayout || 'full_back';
+        // Prefer server-supplied layouts (canvas-fraction zones) when available.
+        if (t.modelLayouts && t.modelLayouts.length) {
+          var sl = null;
+          for (var i = 0; i < t.modelLayouts.length; i++) {
+            if (t.modelLayouts[i].key === ly) { sl = t.modelLayouts[i]; break; }
+          }
+          if (!sl) sl = t.modelLayouts[0];
+          var pzS = sl && sl.zoneJson;
+          if (pzS) {
+            var zoneS = {
+              x: Math.round((pzS.xPct || 0) * t.canvas.width),
+              y: Math.round((pzS.yPct || 0) * t.canvas.height),
+              w: Math.round((pzS.wPct || 1) * t.canvas.width),
+              h: Math.round((pzS.hPct || 1) * t.canvas.height)
+            };
+            if (pzS.radiusFrac) zoneS.radius = Math.round(pzS.radiusFrac * t.canvas.width);
+            else if (sl.key === 'full_back') zoneS.radius = Math.round(0.08 * t.canvas.width);
+            return zoneS;
+          }
+        }
+        // Backwards-compat: hardcoded image-fraction layout zones rebased into canvas pixels.
         var pz = FALLBACK_LAYOUT_ZONES[ly] || FALLBACK_LAYOUT_ZONES.full_back;
         var pb = FALLBACK_PHONE_BOUNDS_IMG;
         var fx = (pz.xPctImg - pb.xPctImg) / pb.wPctImg;
@@ -1649,6 +1803,7 @@
               uploadId: self.uploadId,
               modelKey: self.modelKey,
               templateKey: self.templateKey,
+              layoutKey: (self.template.type === 'fallback_image') ? self.selectedLayout : null,
               scale: self.imageScale,
               offsetX: self.imageOffsetX,
               offsetY: self.imageOffsetY,
@@ -1672,6 +1827,10 @@
         .then(function (d) {
           btn.classList.add('pk-done');
           btn.innerHTML = '✔ Design Confirmed';
+          // If running on Shopify and cart attach is enabled, persist the designId
+          // and trigger an immediate cart-property patch (handles fast users who
+          // hit Add-to-Cart before the next fetch completes).
+          if (d && d.designId) _shopifyRecordDesign(d.designId);
           self._emit('confirm', d);
 
           setTimeout(function () {
@@ -1740,7 +1899,7 @@
       //    inside the natural image so it fills the canvas with no margin.
       if (this.fallbackImage) {
         var img = this.fallbackImage;
-        var pb = FALLBACK_PHONE_BOUNDS_IMG;
+        var pb = (t && t.modelImagePhoneBounds) || FALLBACK_PHONE_BOUNDS_IMG;
         var sx = pb.xPctImg * img.width;
         var sy = pb.yPctImg * img.height;
         var sw = pb.wPctImg * img.width;
@@ -2070,6 +2229,11 @@
   function _lpill(id, lbl, icon, active) {
     return '<div class="pk-lpill' + (active ? ' pk-on' : '') + '" data-layout="' + id + '">' +
       icon + '<span class="pk-lpill-lbl">' + lbl + '</span></div>';
+  }
+
+  function _layoutIconFor(key) {
+    if (key === 'skip_camera') return _svgLayoutSkip();
+    return _svgLayoutFull();
   }
 
   function _esc(s) {
