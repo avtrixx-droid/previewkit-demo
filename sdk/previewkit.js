@@ -681,6 +681,38 @@
       this.container = el;
       el.classList.add('pk');
 
+      // -- Disabling Shopify button
+      setTimeout(function () {
+        const addBtn = document.querySelector('button[name="add"]');
+        const buyNowBtn = document.querySelector('.shopify-payment-button__button');
+
+        if (addBtn) {
+          addBtn.disabled = true;
+          addBtn.style.opacity = "0.5";
+          addBtn.style.cursor = "not-allowed";
+
+          const span = addBtn.querySelector("span");
+          if (span) span.innerText = "Customize to Continue";
+        }
+
+        if (buyNowBtn) {
+          buyNowBtn.style.pointerEvents = "none";
+          buyNowBtn.style.opacity = "0.5";
+        }
+}, 300);
+
+      // -- Disabling Shopify button (observer safety)
+      var pkObserver = new MutationObserver(function () {
+        if (!window._shopifyDesignId) {
+          var btn = document.querySelector('.shopify-payment-button__button');
+          if (btn) {
+            btn.style.pointerEvents = "none";
+            btn.style.opacity = "0.5";
+          }
+        }
+      });
+
+      pkObserver.observe(document.body, { childList: true, subtree: true });
       // Resolve theme & apply class to container so trigger button + 404 banner are themed
       this.theme = _resolveTheme(this.themePref, el);
       el.classList.remove('pk-theme-light', 'pk-theme-dark');
@@ -1782,6 +1814,23 @@
       if (!this.apiKey) {
         btn.classList.add('pk-done'); btn.disabled = true;
         btn.innerHTML = _svg('check', 15, 15, '#fff') + ' Saved (Demo)';
+        // -- Enabling Shopify button after design confirm
+        const addBtn = document.querySelector('button[name="add"]');
+        const buyNowBtn = document.querySelector('.shopify-payment-button__button');
+
+        if (addBtn) {
+          addBtn.disabled = false;
+          addBtn.style.opacity = "1";
+          addBtn.style.cursor = "pointer";
+
+          const span = addBtn.querySelector("span");
+          if (span) span.innerText = "Add to Cart";
+        }
+
+        if (buyNowBtn) {
+          buyNowBtn.style.pointerEvents = "auto";
+          buyNowBtn.style.opacity = "1";
+        }
         this._emit('confirm', { modelKey: this.modelKey, timestamp: new Date().toISOString() });
         var self2 = this;
         setTimeout(function () { self2._closeModal(); self2._updateTriggerDone(); }, 1400);
