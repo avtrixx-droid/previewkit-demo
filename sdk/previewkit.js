@@ -122,7 +122,7 @@
   } catch (e) {}
 
   // Universal phone-back fallback image (used when no vendorTemplate is provided)
-  var FALLBACK_IMAGE_URL = 'https://res.cloudinary.com/dtjbyme7m/image/upload/v1777397169/Iphone17_bp99hm.webp';
+  var FALLBACK_IMAGE_URL = 'https://res.cloudinary.com/dtjbyme7m/image/upload/v1777977024/fallback_uuvpun.webp';
   // Photo-zone over the fallback image, expressed in IMAGE-relative fractions (0–1
    // of the natural image size). This keeps it aligned regardless of canvas size.
    // The fallback image (Iphone17_bp99hm.webp) is square; the phone occupies roughly
