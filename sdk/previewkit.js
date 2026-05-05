@@ -146,7 +146,7 @@
     // edge into transparent corner area, exposing the modal background and making
     // the corners look "thick". This radius lets the photo terminate exactly at the
     // case outer edge so the bezel appears uniformly thin all the way around.
-    full_back:   { xPctImg: 0.295, yPctImg: 0.065, wPctImg: 0.41, hPctImg: 0.872, radiusFrac: 0 },
+    full_back:   { xPctImg: 0.295, yPctImg: 0.065, wPctImg: 0.41, hPctImg: 0.872, radiusFrac: 0.06  },
     // Below Camera = photo only below the camera plateau (vertically centered with symmetric ~0.04 margins).
     skip_camera: { xPctImg: 0.32,  yPctImg: 0.40,  wPctImg: 0.36, hPctImg: 0.48 }
   };
