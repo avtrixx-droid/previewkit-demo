@@ -681,17 +681,17 @@
       this.container = el;
       el.classList.add('pk');
 
-      // -- Disabling Shopify button
+      // -- Disabling Shopify button (initial state)
       setTimeout(function () {
-        const addBtn = document.querySelector('button[name="add"]');
-        const buyNowBtn = document.querySelector('.shopify-payment-button__button');
+        var addBtn = document.querySelector('button[name="add"]');
+        var buyNowBtn = document.querySelector('.shopify-payment-button__button');
 
         if (addBtn) {
           addBtn.disabled = true;
           addBtn.style.opacity = "0.5";
           addBtn.style.cursor = "not-allowed";
 
-          const span = addBtn.querySelector("span");
+          var span = addBtn.querySelector("span");
           if (span) span.innerText = "Customize to Continue";
         }
 
@@ -699,20 +699,8 @@
           buyNowBtn.style.pointerEvents = "none";
           buyNowBtn.style.opacity = "0.5";
         }
-}, 300);
+      }, 300);
 
-      // -- Disabling Shopify button (observer safety)
-      var pkObserver = new MutationObserver(function () {
-        if (!window._shopifyDesignId) {
-          var btn = document.querySelector('.shopify-payment-button__button');
-          if (btn) {
-            btn.style.pointerEvents = "none";
-            btn.style.opacity = "0.5";
-          }
-        }
-      });
-
-      pkObserver.observe(document.body, { childList: true, subtree: true });
       // Resolve theme & apply class to container so trigger button + 404 banner are themed
       this.theme = _resolveTheme(this.themePref, el);
       el.classList.remove('pk-theme-light', 'pk-theme-dark');
@@ -1071,10 +1059,10 @@
         // Scale lens size proportionally to island width for visual consistency
         const lensOuter = Math.round(island.width * 0.35);   // Optimized for Samsung
         const lensInner = Math.round(lensOuter * 0.65);
-        
+
         const totalSpan = (count - 1) * (island.width * 0.35);  // Spacing based on island
         const startY = cy - totalSpan / 2;
-        
+
         return Array.from({ length: count }).map((_, i) => ({
           cx,
           cy: startY + i * (island.width * 0.35),
@@ -1091,10 +1079,10 @@
         // Samsung horizontal: lenses arranged left-to-right inside rectangular island
         const lensOuter = Math.round(island.width * 0.35);   // Optimized for Samsung
         const lensInner = Math.round(lensOuter * 0.65);
-        
+
         const totalSpan = (count - 1) * (island.width * 0.35);  // Spacing based on island
         const startX = cx - totalSpan / 2;
-        
+
         return Array.from({ length: count }).map((_, i) => ({
           cx: startX + i * (island.width * 0.35),
           cy,
@@ -1814,24 +1802,8 @@
       if (!this.apiKey) {
         btn.classList.add('pk-done'); btn.disabled = true;
         btn.innerHTML = _svg('check', 15, 15, '#fff') + ' Saved (Demo)';
-        // -- Enabling Shopify button after design confirm
-        const addBtn = document.querySelector('button[name="add"]');
-        const buyNowBtn = document.querySelector('.shopify-payment-button__button');
-
-        if (addBtn) {
-          addBtn.disabled = false;
-          addBtn.style.opacity = "1";
-          addBtn.style.cursor = "pointer";
-
-          const span = addBtn.querySelector("span");
-          if (span) span.innerText = "Add to Cart";
-        }
-
-        if (buyNowBtn) {
-          buyNowBtn.style.pointerEvents = "auto";
-          buyNowBtn.style.opacity = "1";
-        }
         this._emit('confirm', { modelKey: this.modelKey, timestamp: new Date().toISOString() });
+
         var self2 = this;
         setTimeout(function () { self2._closeModal(); self2._updateTriggerDone(); }, 1400);
         return;
@@ -1879,6 +1851,27 @@
           // If running on Shopify and cart attach is enabled, persist the designId
           // and trigger an immediate cart-property patch (handles fast users who
           // hit Add-to-Cart before the next fetch completes).
+          // -- Disabling Shopify button (enable after confirm success)
+              window.previewkitDesignId = d.designId;
+
+              var addBtn = document.querySelector('button[name="add"]');
+              var buyNowBtn = document.querySelector('.shopify-payment-button__button');
+
+              if (addBtn) {
+                addBtn.disabled = false;
+                addBtn.style.opacity = "1";
+                addBtn.style.cursor = "pointer";
+
+                var span = addBtn.querySelector("span");
+                if (span) span.innerText = "Add to Cart";
+              }
+
+              if (buyNowBtn) {
+                buyNowBtn.style.pointerEvents = "auto";
+                buyNowBtn.style.opacity = "1";
+              }
+
+
           if (d && d.designId) _shopifyRecordDesign(d.designId);
           self._emit('confirm', d);
 
@@ -2299,7 +2292,7 @@
 
   function _debounce(fn, ms) {
     var t;
-    return function () { clearTimeout(t); t = setTimeout(fn, ms); };
+    return function () { clearTimeout(t); t = setTimeout(fn, ms); el.classList.add('pk');};
   }
 
   /* ─── Global facade ───────────────────────────────────────────────────────── */
