@@ -12,7 +12,7 @@
 (function (root) {
   'use strict';
 
-  var SDK_VERSION = '2.7.0';
+  var SDK_VERSION = '2.8.0';
   var DEFAULT_URL = 'http://localhost:8080';
   var SCALE_MIN = 1.0;
   var SCALE_MAX = 4.0;
@@ -664,6 +664,9 @@
     this._hintTimer = null;
     this._backdrop = null;
     this._modal = null;
+    this._preUploadPromise = null;
+    this._preUploadAbort = null;
+    this._cachedUploadResult = null;
   }
 
   Widget.prototype = {
@@ -757,6 +760,8 @@
     _emit: function (ev, d) { (this.listeners[ev] || []).forEach(function (f) { f(d); }); },
 
     reset: function () {
+      this._cancelPreUpload();
+      this._cachedUploadResult = null;
       this.userImage = null;
       this.userFile = null;
       this.uploadId = null;
@@ -1732,6 +1737,9 @@
             '</div>';
           zone.querySelector('[data-chg]').addEventListener('click', function (e) {
             e.stopPropagation();
+            self._cancelPreUpload();
+            self._cachedUploadResult = null;
+            self.uploadId = null;
             self._modal.querySelector('.pk-file-inp').click();
           });
         }
@@ -1747,7 +1755,74 @@
         var btn = self._modal.querySelector('.pk-cta');
         if (btn) btn.disabled = false;
         self._emit('upload', { file: file, width: img.width, height: img.height });
+
+        // Kick off pre-upload in the background so Confirm Design feels instant.
+        self._cachedUploadResult = null;
+        self._cancelPreUpload();
+        self._preUploadPromise = self._startPreUpload();
+        // swallow rejection here so unhandledrejection doesn't fire — _confirm
+        // will re-await this same promise and surface the error if needed.
+        if (self._preUploadPromise && self._preUploadPromise.catch) {
+          self._preUploadPromise.catch(function () {});
+        }
       });
+    },
+
+    _startPreUpload: function () {
+      var self = this;
+      var ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      this._preUploadAbort = ac;
+
+      var fd = new FormData();
+      fd.append('file', this.userFile);
+      fd.append('modelKey', this.modelKey);
+      if (this.templateKey) fd.append('templateKey', this.templateKey);
+      fd.append('scale', this.imageScale);
+      fd.append('offsetX', this.imageOffsetX);
+      fd.append('offsetY', this.imageOffsetY);
+      var z = this._zone();
+      fd.append('zoneX', z.x);
+      fd.append('zoneY', z.y);
+      fd.append('zoneW', z.w);
+      fd.append('zoneH', z.h);
+
+      var opts = {
+        method: 'POST',
+        headers: this.apiKey ? { 'X-PreviewKit-Key': this.apiKey } : {},
+        body: fd
+      };
+      if (ac) opts.signal = ac.signal;
+
+      // Demo mode (no apiKey): skip pre-upload entirely.
+      if (!this.apiKey) return Promise.resolve(null);
+
+      return fetch(this.apiUrl + '/v1/uploads', opts)
+        .then(function (r) {
+          if (!r.ok) return r.json().then(function (e) { return Promise.reject(e); });
+          return r.json();
+        })
+        .then(function (json) {
+          if (ac && ac.signal.aborted) return null;
+          if (!json || !json.uploadId) throw new Error('uploadId missing in response');
+          self._cachedUploadResult = json;
+          self.uploadId = json.uploadId;
+          console.log('[PreviewKit] pre-upload complete', json.uploadId);
+          return json;
+        })
+        .catch(function (err) {
+          if (err && err.name === 'AbortError') return null;
+          self._cachedUploadResult = null;
+          console.warn('[PreviewKit] pre-upload failed', err);
+          throw err;
+        });
+    },
+
+    _cancelPreUpload: function () {
+      if (this._preUploadAbort) {
+        try { this._preUploadAbort.abort(); } catch (e) {}
+        this._preUploadAbort = null;
+      }
+      this._preUploadPromise = null;
     },
 
     _upload: function () {
@@ -1799,6 +1874,10 @@
       var btn = this._modal.querySelector('.pk-cta');
       if (!btn || btn.disabled) return;
 
+      // 1. Lock UI immediately so the user gets feedback even before any await.
+      btn.disabled = true;
+      btn.innerHTML = '<div class="pk-spin"></div> Confirming&#8230;';
+
       if (!this.apiKey) {
         btn.classList.add('pk-done'); btn.disabled = true;
         btn.innerHTML = _svg('check', 15, 15, '#fff') + ' Saved (Demo)';
@@ -1809,8 +1888,24 @@
         return;
       }
 
-      var self = this;
-      this._upload()
+      // 2. Resolve uploadId — prefer cached pre-upload, else awaited in-flight, else fall back.
+      var uploadPromise;
+      if (this._cachedUploadResult && this.uploadId) {
+        uploadPromise = Promise.resolve(this._cachedUploadResult);
+      } else if (this._preUploadPromise) {
+        uploadPromise = this._preUploadPromise.then(function (r) {
+          // If pre-upload was aborted/null, fall back to a fresh _upload.
+          if (r && self.uploadId) return r;
+          return self._upload();
+        }, function () {
+          // Pre-upload failed — retry via legacy _upload path.
+          return self._upload();
+        });
+      } else {
+        uploadPromise = this._upload();
+      }
+
+      uploadPromise
         .then(function () {
           var zone = self._zone();
           var canvas = self.template.canvas || { width: 1, height: 1 };
